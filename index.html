@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1b1528" />
+    <link rel="icon" href="data:," />
+    <title>Jackson Heights RPG</title>
+  </head>
+  <body>
+    <main id="app">
+      <div id="game"></div>
+      <!-- On-screen controls: hidden unless the device has touch (see src/systems/touchControls.ts). -->
+      <div id="touch-controls" aria-hidden="true">
+        <div id="dpad">
+          <div class="arm up"></div>
+          <div class="arm left"></div>
+          <div class="hub"></div>
+          <div class="arm right"></div>
+          <div class="arm down"></div>
+        </div>
+        <div id="action-btn"></div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

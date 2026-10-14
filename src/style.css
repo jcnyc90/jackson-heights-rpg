@@ -1,0 +1,148 @@
+:root {
+  --bg: #1b1528;
+  --outline: #2a1f3d;
+  --pad: #f4e9ff;
+  --pad-pressed: #ffc8e0;
+  --dpad-cell: 44px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  /* Game page: no scrolling, pinch-zoom, pull-to-refresh, text selection or callouts. */
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#game {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Phaser's pixelArt mode sets image-rendering: pixelated on the canvas itself. */
+canvas {
+  display: block;
+}
+
+/* ---- Touch controls (only when <html> has the `touch` class) ---- */
+
+#touch-controls {
+  display: none;
+}
+
+/* Portrait: game pinned to the top, control strip fills the space below it. */
+@media (orientation: portrait) {
+  .touch #app {
+    padding-top: env(safe-area-inset-top);
+  }
+  .touch #game {
+    flex: 0 1 auto;
+    aspect-ratio: 256 / 224; /* GAME_WIDTH / GAME_HEIGHT in src/config.ts */
+  }
+}
+
+.touch #touch-controls {
+  display: flex;
+  flex: 1 0 180px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px calc(24px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom))
+    calc(24px + env(safe-area-inset-left));
+}
+
+/* Landscape: controls float over the letterbox bars beside the game. The D-pad shrinks
+   to fit the bar ((viewport width - game width) / 2, game width = height * 256/224)
+   down to a 32px floor; on 4:3 tablets and foldables the bars are narrower than that,
+   so the controls overlap the edge of the game there. */
+@media (orientation: landscape) {
+  :root {
+    --dpad-cell: clamp(32px, calc((100vw - 100vh * 256 / 224) / 6 - 8px), 44px);
+  }
+  .touch #touch-controls {
+    position: absolute;
+    inset: 0;
+    align-items: flex-end;
+    padding: 16px calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom))
+      calc(16px + env(safe-area-inset-left));
+    pointer-events: none;
+    opacity: 0.85;
+  }
+  .touch #touch-controls > * {
+    pointer-events: auto;
+  }
+}
+
+#dpad {
+  display: grid;
+  grid-template: repeat(3, var(--dpad-cell)) / repeat(3, var(--dpad-cell));
+  touch-action: none;
+  /* Four offset shadows draw a chunky outline around the cross silhouette. */
+  filter: drop-shadow(3px 0 0 var(--outline)) drop-shadow(-3px 0 0 var(--outline))
+    drop-shadow(0 3px 0 var(--outline)) drop-shadow(0 -3px 0 var(--outline));
+}
+
+#dpad > div {
+  background: var(--pad);
+}
+
+#dpad .up {
+  grid-area: 1 / 2;
+  border-radius: 6px 6px 0 0;
+}
+#dpad .left {
+  grid-area: 2 / 1;
+  border-radius: 6px 0 0 6px;
+}
+#dpad .hub {
+  grid-area: 2 / 2;
+}
+#dpad .right {
+  grid-area: 2 / 3;
+  border-radius: 0 6px 6px 0;
+}
+#dpad .down {
+  grid-area: 3 / 2;
+  border-radius: 0 0 6px 6px;
+}
+
+#dpad[data-dir='up'] .up,
+#dpad[data-dir='down'] .down,
+#dpad[data-dir='left'] .left,
+#dpad[data-dir='right'] .right {
+  background: var(--pad-pressed);
+}
+
+#action-btn {
+  width: calc(var(--dpad-cell) * 1.7);
+  height: calc(var(--dpad-cell) * 1.7);
+  border-radius: 50%;
+  background: var(--pad);
+  border: 3px solid var(--outline);
+  box-shadow: 0 4px 0 var(--outline);
+  touch-action: none;
+}
+
+#action-btn.pressed {
+  background: var(--pad-pressed);
+  box-shadow: 0 1px 0 var(--outline);
+  transform: translateY(3px);
+}
