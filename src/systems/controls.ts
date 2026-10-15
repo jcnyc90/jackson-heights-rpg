@@ -25,6 +25,14 @@ export class Controls {
       for (const code of codes) this.directionKeys.push([dir, keyboard.addKey(code)]);
     }
     this.actionKeys = ACTION_KEYS.map((code) => keyboard.addKey(code));
+
+    // Release held keys when the window loses focus. Phaser's own blur listener isn't enough:
+    // KeyboardPlugin.shutdown() (v3 and v4) removes every scene's listener because it calls
+    // off() without a context, so stopping any other scene would leave keys stuck after
+    // alt-tab. A listener with its own function reference survives that.
+    const releaseKeys = () => keyboard.resetKeys();
+    scene.game.events.on(Phaser.Core.Events.BLUR, releaseKeys);
+    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => scene.game.events.off(Phaser.Core.Events.BLUR, releaseKeys));
   }
 
   /**

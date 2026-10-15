@@ -5,7 +5,7 @@ export default defineConfig({
   // repo name, and from `npm run preview`.
   base: './',
   build: {
-    // Phaser alone is ~1.2 MB minified, so the default 500 kB warning would fire on every build.
+    // Phaser 4 alone is ~1.4 MB minified, so the default 500 kB warning would fire on every build.
     chunkSizeWarningLimit: 1500,
   },
 });

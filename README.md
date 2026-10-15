@@ -1,6 +1,6 @@
 # Jackson Heights RPG
 
-An EarthBound-inspired browser RPG set in Jackson Heights, Queens. Built with Phaser 3, Vite and TypeScript.
+An EarthBound-inspired browser RPG set in Jackson Heights, Queens. Built with Phaser 4, Vite and TypeScript.
 
 > **Status: session 1 scaffold.** There's a walkable test map with collision, keyboard and touch controls, and placeholder art generated in code. No story, dialogue, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
 
