@@ -3,7 +3,8 @@
 An EarthBound-inspired browser RPG set in Jackson Heights, Queens. A community love letter.
 
 - **Repo:** `jcnyc90/jackson-heights-rpg`, deployed to GitHub Pages.
-- **Stack:** Phaser 4 (4.2.1) + Vite + TypeScript, static site, no backend.
+- **Stack:** Phaser 4 (4.2.1) + Vite + TypeScript, static site, no backend. Live at <https://jcnyc90.github.io/jackson-heights-rpg/>.
+- **Licences:** code MIT (`LICENSE`); content CC BY-NC-SA 4.0 (`LICENSE-CONTENT`). README.md lists which paths fall under each.
 
 This document has three parts:
 
@@ -168,6 +169,7 @@ Behaviour parity was verified against Phaser 3 baselines recorded in the same se
 - **Flipping tiles in code (session 3):** v4's `TransformerTile` has a vertical-flip bug (it adjusts x instead of y). It only triggers through runtime `Tile.setFlipY` / `toggleFlipY` / `setFlip(_, true)`, or by copying such a tile. Tiled's own flips and rotations are parsed into `rotation` + `flipX` and render correctly. Don't flip tiles on Y in code.
 - **Tiled tile animations now play:** v4 animates tiles that have Tiled `animation` data, where v3 drew a still frame.
 - **Sprite-vs-sprite physics changed:** fixes in `ProcessX` and `separateCircle`. Sprite-vs-tile is byte-identical. Re-check push behaviour when NPC colliders arrive.
+- **Licence notices:** minification strips all licence comments, including those of the libraries Phaser inlines (Matter.js, poly-decomp, Earcut, Simplify.js, psrdnoise, eventemitter3 and a few snippets). Keeping legal comments would add about 294 KB and still miss Earcut and Simplify. Instead, `vite.config.ts` adds one `postBanner`, and `public/THIRD-PARTY-NOTICES.txt` carries every required text. Re-check it on each Phaser upgrade (README → License).
 - **Other v4 changes we don't use:** FX/masks became filters, the tint API changed (`setTintFill` was removed), `Geom.Point` became `Vector2`, `Math.TAU` is now 2π, DynamicTexture needs `render()`, Mesh/Plane were removed. See the migration guide in `node_modules/phaser/skills/v3-to-v4-migration/`.
 
 ---
@@ -198,5 +200,5 @@ Each session should produce one small, testable result and end with a report.
 2. **Encounters:** visible enemies on the map (EarthBound-style) or random encounters?
 3. **Real people in Pride history:** the "no identifiable people" rule is written for antagonists and businesses. Does it also cover respectful references to real historical figures and events? For example, the 1990 killing of Julio Rivera, which helped spur Queens Pride.
 4. **Community review:** who reviews each community's portrayal, and when in the pipeline?
-5. **Licence:** code licence (e.g. MIT) versus art and writing licence (e.g. CC BY-NC or all rights reserved). Decide before the repo goes public.
+5. ~~**Licence**~~ Decided in session 2: MIT for code, CC BY-NC-SA 4.0 for content, copyright jcnyc90.
 6. ~~**Engine**~~ Decided in session 2: Phaser 4.

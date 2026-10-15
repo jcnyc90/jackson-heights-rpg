@@ -2,7 +2,9 @@
 
 An EarthBound-inspired browser RPG set in Jackson Heights, Queens. Built with Phaser 4, Vite and TypeScript.
 
-> **Status: session 1 scaffold.** There's a walkable test map with collision, keyboard and touch controls, and placeholder art generated in code. No story, dialogue, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
+Play it: <https://jcnyc90.github.io/jackson-heights-rpg/>
+
+> **Status: early scaffold.** There's a walkable test map with collision, keyboard and touch controls, and placeholder art generated in code. No story, dialogue, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
 
 ## Requirements
 
@@ -59,7 +61,7 @@ The workflow `.github/workflows/deploy.yml` builds and publishes `dist/` on ever
 
 One-time setup:
 
-1. Create an **empty** GitHub repo `jcnyc90/jackson-heights-rpg`, without a README or licence, so the first push doesn't conflict. On the GitHub Free plan, Pages only works for **public** repos. Decide the licence first (see `docs/DESIGN.md` §4).
+1. Create an **empty** GitHub repo `jcnyc90/jackson-heights-rpg`, without a README or licence, so the first push doesn't conflict. On the GitHub Free plan, Pages only works for **public** repos. Don't let GitHub add a licence; `LICENSE` and `LICENSE-CONTENT` are already in the repo.
 2. On GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 3. Push. The local repo is already on branch `main`; the workflow only runs for `main`.
    ```bash
@@ -67,8 +69,6 @@ One-time setup:
    git push -u origin main
    ```
 4. Watch the **Actions** tab. The site goes live at <https://jcnyc90.github.io/jackson-heights-rpg/>. If the push happened before step 2, re-run the workflow from the Actions tab.
-
-If you start from a fresh copy that has no `.git` folder, run `git init -b main && git add -A && git commit -m "Initial commit"` before step 3.
 
 ## Project layout
 
@@ -88,7 +88,10 @@ src/
   data/
     maps/test-map.json     Tiled map (30x20)
 public/assets/             real art/audio goes here (served as-is)
-docs/DESIGN.md             locked decisions, conventions, roadmap
+public/THIRD-PARTY-NOTICES.txt  licences of bundled third-party code (served with the game)
+docs/DESIGN.md             locked decisions, conventions, Phaser 4 notes, roadmap
+LICENSE                    MIT (code)
+LICENSE-CONTENT            CC BY-NC-SA 4.0 (content)
 ```
 
 ## Swapping in real art
@@ -101,6 +104,27 @@ this.load.image(TEXTURES.tiles, 'assets/tilesets/tiles.png');
 ```
 
 Layouts are documented in [`docs/DESIGN.md` §2.3](docs/DESIGN.md#23-asset-keys-and-sizes-swap-contract).
+
+## License
+
+Code and content are licensed separately. Copyright (c) 2026 jcnyc90.
+
+| License | Applies to |
+|---------|------------|
+| **MIT** ([`LICENSE`](LICENSE)) — code | `src/**` except `src/data/**` (including `src/systems/placeholderArt.ts`: its code-drawn placeholder art is MIT like the rest of the code, and replacing it later doesn't revoke that), `src/style.css`, `index.html`, build and tooling files (`package.json`, `package-lock.json`, `tsconfig.json`, `vite.config.ts`, `.github/**`, dotfiles), and this `README.md` |
+| **CC BY-NC-SA 4.0** ([`LICENSE-CONTENT`](LICENSE-CONTENT)) — content | `src/data/**` (maps now; dialogue, story text and other game data later), `public/assets/**` (art, audio), and `docs/**` (design and narrative documents) |
+
+Content paths take precedence over code paths. Anything not listed under content is code and falls under MIT, except the licence and notice files themselves (`LICENSE`, `LICENSE-CONTENT`, `public/THIRD-PARTY-NOTICES.txt`), which keep their own terms. `package.json` declares `"license": "MIT"` for the code.
+
+The built game in `dist/` bundles both kinds of material, so redistributing the build means following both licences, including CC BY-NC-SA's non-commercial and share-alike terms for the content.
+
+Third-party: the build bundles [Phaser](https://phaser.io) (MIT), along with code Phaser itself includes: eventemitter3, Matter.js, poly-decomp (MIT), Earcut (ISC), Simplify.js (BSD-2-Clause), psrdnoise (MIT) and a few attributed snippets. Their notices ship with the game in [`public/THIRD-PARTY-NOTICES.txt`](public/THIRD-PARTY-NOTICES.txt), and a banner at the top of the built JS points to it.
+
+When Phaser or other dependencies change, update that file. Check the installed `LICENSE` files, and look for vendored code inside Phaser's build with:
+
+```bash
+grep -nE "ISC License|Redistribution and use|Copyright \(c\)|@license" node_modules/phaser/dist/phaser.esm.js | grep -v "Phaser Studio"
+```
 
 ## Editing maps
 
