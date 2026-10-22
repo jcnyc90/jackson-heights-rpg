@@ -3,5 +3,6 @@
   "neighbor-b.hello": ["dialogue.neighbor-b.hello.1", "dialogue.neighbor-b.hello.2"],
   "neighbor-c.hello": ["dialogue.neighbor-c.hello.1", "dialogue.neighbor-c.font-test"],
   "neighbor-d.hello": ["dialogue.neighbor-d.hello.1"],
-  "neighbor-e.hello": ["dialogue.neighbor-e.hello.1"]
+  "neighbor-e.hello": ["dialogue.neighbor-e.hello.1"],
+  "dispatcher.hello": ["dialogue.dispatcher.hello.1"]
 }

@@ -19,5 +19,31 @@
   "dialogue.neighbor-c.hello.1": "{name} here. Nice weather today.",
   "dialogue.neighbor-c.font-test": "Font test: ¿Qué tal? ¡Sí! Mañana, pingüino, árbol, índice, ópera, último.",
   "dialogue.neighbor-d.hello.1": "Hi, I'm {name}. This street is a rough placeholder for now.",
-  "dialogue.neighbor-e.hello.1": "Hello, I'm {name}. This plaza is a rough placeholder too."
+  "dialogue.neighbor-e.hello.1": "Hello, I'm {name}. This plaza is a rough placeholder too.",
+
+  "npc.dispatcher.name": "Dispatcher",
+  "dialogue.dispatcher.hello.1": "I'm the {name}. I hand out delivery orders, one at a time.",
+  "dispatcher.busy.assigned": "You still have {item} to pick up at {pickup}.",
+  "dispatcher.busy.picked-up": "You're carrying {item}. Bring it to {dropoff}.",
+  "dispatcher.none-left": "That's every order for now. Thanks for the help!",
+
+  "item.order-1.name": "Order #1",
+  "item.order-2.name": "Order #2",
+  "item.order-3.name": "Order #3",
+  "order.order-1.assign": "{item} is ready for pickup at {pickup}. Bring it to {dropoff}.",
+  "order.order-1.picked-up": "You picked up {item}. Bring it to {dropoff}.",
+  "order.order-1.delivered": "You delivered {item}. Nice work!",
+  "order.order-2.assign": "{item} is ready for pickup at {pickup}. Bring it to {dropoff}.",
+  "order.order-2.picked-up": "You picked up {item}. Bring it to {dropoff}.",
+  "order.order-2.delivered": "You delivered {item}. Nice work!",
+  "order.order-3.assign": "{item} is ready for pickup at {pickup}. Bring it to {dropoff}.",
+  "order.order-3.picked-up": "You picked up {item}. Bring it to {dropoff}.",
+  "order.order-3.delivered": "You delivered {item}. Nice work!",
+  "delivery.nothing": "Nothing here.",
+  "delivery.not-picked-up": "{item} goes here, but you haven't picked it up yet. It's at {pickup}.",
+
+  "hud.order.assigned": "{item}: not picked up",
+  "hud.order.picked-up": "{item}: picked up",
+  "hud.go.assigned": "Pick up at {map}",
+  "hud.go.picked-up": "Deliver to {map}"
 }

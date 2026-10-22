@@ -12,7 +12,7 @@ This document has three parts:
 2. **Technical conventions:** set in session 1 to keep future work cheap. They're cheap to change now and get more expensive later.
 3. **Roadmap and open questions.**
 
-Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1. Section 2.11 covers dialogue and NPCs (session 3), and 2.12 maps, warps and zones (session 4).
+Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1. Section 2.11 covers dialogue and NPCs (session 3), 2.12 maps, warps and zones (session 4), and 2.13 the delivery loop (session 5).
 
 ---
 
@@ -79,6 +79,7 @@ All keys live in `src/config.ts` (`TEXTURES`, `PLAYER_FRAME`).
 | `font` | Bitmap font (fixed cell) | Loaded from `public/assets/fonts/spleen-6x12.png` (Spleen 6x12, see 2.11). `FONT` in `config.ts`: 6×12 cells (ascent 9, descent 3), 16 per row, in `FONT_CHARS` order (`src/systems/font.ts`): printable ASCII U+0020–U+007E, then printable Latin-1 U+00A0–U+00FF; 191 glyphs, 96×144. `#fffaf0` glyphs on transparent |
 | `text-window` | Image | `TEXT_WINDOW` size (240×56): dark panel, 2 px light frame, rounded corners |
 | `text-cursor` | Image | 5×3 "more" triangle that blinks once a page is fully typed |
+| `delivery-point` | Image | 16×16 door-with-parcel marker drawn at each delivery point (2.13), bottom-centred on its rectangle |
 
 The player's collision box (`PLAYER_FEET`, 10×8) is centred at the bottom of the frame. It's derived from the frame size, so a different sprite size keeps the box at the feet.
 
@@ -97,7 +98,7 @@ The player's collision box (`PLAYER_FEET`, 10×8) is centred at the bottom of th
 - Required layers:
   - `ground`: tile layer, no collision.
   - `obstacles`: tile layer. Any tile whose tileset entry has the bool property **`collides: true`** blocks movement.
-  - `objects`: object layer with at least one **spawn point**, plus any **warps** (2.12). Session 4 replaced the old `player-spawn` point with a spawn point whose `spawnId` is `start`.
+  - `objects`: object layer with at least one **spawn point**, plus any **warps** (2.12) and **delivery points** (2.13). Session 4 replaced the old `player-spawn` point with a spawn point whose `spawnId` is `start`.
 - Optional tile layer `above`: drawn **over every sprite** (tree canopies, awnings). It never collides; collision stays on `obstacles`. Put a canopy one tile **north** of its trunk: on the trunk's own tile it would also cover a player standing in front of the tree. Every tree on the test map is two tiles tall this way (trunk in `obstacles`, canopy in `above`).
 - Optional layer `npcs`: object layer, one **point** per NPC at its feet, with custom properties:
 
@@ -180,6 +181,8 @@ The player's collision box (`PLAYER_FEET`, 10×8) is centred at the bottom of th
 - **Text window speed is fixed** at 30 characters/s; a text-speed setting belongs to the settings work (roadmap session 6).
 - **Tiles don't y-sort:** sprites sort by feet y; `obstacles` tiles draw under every sprite and `above` tiles over every sprite. That covers trees and awnings. Anything that must be in front of some sprites and behind others at the same spot (e.g. a lamp post a player walks around on both sides) still needs a sprite, not a tile.
 - **Map display name card** is plain text on a dark box, drawn by `MapScene` for 1.5 s after a warp. Placeholder UI.
+- **Order ticket** is plain text on a dark box (placeholder UI, like the name card). It's sized to its text: a map name longer than about 30 characters makes it wider than the 4:3 safe area checked by touch-check.js (2.13).
+- **Delivery state is in memory only:** a reload loses the active order and the reward total. Saves come later.
 - **The tileset PNG is a copy** of generated art. H6 guards drift; it goes away when real tiles replace the placeholder.
 
 ### 2.10 Phaser 4 notes (port from 3.90.0 to 4.2.1, session 2)
@@ -269,6 +272,40 @@ Name each object for the editor (`to-roosevelt-ave`, `from-test-map`); the game 
 
 The test map's warp sits on tiles no session 1–3 check visits, so the old checks' walks never trigger it.
 
+
+### 2.13 Delivery loop (session 5)
+
+**Flow.** One active order at a time. Talk to the **Dispatcher** (an NPC with `role: dispatcher`, on the test map) to get the next order. Face the order's **pickup** point and press Action to pick it up, then face its **dropoff** point and press Action to deliver it. Every order needs at least one warp per leg. No choice menus: talking to the Dispatcher assigns the order.
+
+| Action | Result (line shown in the text window) |
+|--------|----------------------------------------|
+| Dispatcher, no active order | Assigns the next order not yet delivered, in list order (`text.assign`). After the last one: `dispatcher.none-left`. |
+| Dispatcher, order active | Reminder: `dispatcher.busy.assigned` or `dispatcher.busy.picked-up`. |
+| Active order's pickup, not picked up yet | Picked up (`text.pickedUp`). |
+| Active order's dropoff, picked up | Delivered (`text.delivered`); the reward is added to the total; no active order. |
+| Active order's dropoff, not picked up yet | `delivery.not-picked-up` (where to pick it up). |
+| Any other delivery point, or no active order | `delivery.nothing` ("Nothing here."). |
+
+The Dispatcher's own `dialogueId` lines come first, then the order line. NPCs come first: a point behind an NPC isn't reachable with Action.
+
+**Orders** (`src/data/orders.json`, `src/systems/orders.ts`): `id` (unique), `itemId`, `reward` (number ≥ 0), `pickup` and `dropoff` (`{ map, pointId }`), and `text`, the string IDs of everything the player reads about the order: `item` (its name), `assign`, `pickedUp`, `delivered`. Order strings can use `{item}`, `{pickup}`, `{dropoff}` (map display names) and `{reward}`. Validation: field types, unique `id`, a registered map, a delivery point on that map, pickup ≠ dropoff, every string ID present. **Dev builds throw** on the first problem when the module loads (the game doesn't start); **production** skips a bad order with a warning and keeps the rest, matching the warp-link policy (2.12).
+
+**Delivery points** (layer `objects`, class `deliveryPoint`): a **rectangle** with the string property `pointId`, unique per map. Action reaches it the same way it reaches an NPC: the rectangle must overlap the 16 px strip in front of the player's feet. The stub maps put each point on a wall tile, so the player faces it from the sidewalk. A point, a missing `pointId` or a duplicate `pointId` throws at load in every build.
+
+**State** (`src/systems/gameState.ts`): the active order and its status (`assigned` → `picked-up`), delivered order IDs and the reward total, in a module that lives outside `MapScene`, so it survives warps (the scene restarts on each one). Memory only: no saves yet (2.7). The reward total isn't shown anywhere yet (no money UI).
+
+**Order ticket.** Shown only while an order is active: line 1 is the item and its status (`hud.order.assigned` / `hud.order.picked-up`), line 2 the map to go to next, the pickup's until it's picked up, then the dropoff's (`hud.go.*`). Plain text on a dark box at whole-pixel positions, centred horizontally, 24 px from the top, under the map name card's row. Near a map's top edge the camera stops scrolling and the player reaches the top of the screen, so while the ticket would cover the player's sprite it moves to 4 px from the bottom (like the text window, 2.11). It fades with the map and draws under the text window. The touch controls only ever sit below the game (portrait) or along the bottom corners (landscape), so the ticket clears them in both places; touch-check.js measures every order's ticket in both positions against the D-pad and Action button.
+
+**Placeholder content (disposable with the stub zones).** Three orders, "Order #1" to "Order #3", no real food, businesses or people:
+
+| Order | Pickup | Dropoff | Warps from the Dispatcher |
+|-------|--------|---------|---------------------------|
+| `order-1` (reward 10) | `roosevelt-ave` / `rav-a` (north wall) | `diversity-plaza-74th` / `plaza-b` (south wall) | test map → Roosevelt Ave; → Diversity Plaza |
+| `order-2` (15) | `diversity-plaza-74th` / `plaza-a` (north wall) | `roosevelt-ave` / `rav-b` (south wall) | → Roosevelt Ave → Diversity Plaza; → Roosevelt Ave |
+| `order-3` (20) | `roosevelt-ave` / `rav-b` | `diversity-plaza-74th` / `plaza-a` | → Roosevelt Ave; → Diversity Plaza |
+
+The Dispatcher stands on the test map's south-east sidewalk at (440, 288), outside every session 1–4 render shot and walk.
+
 ---
 
 ## 3. Roadmap
@@ -281,7 +318,7 @@ Each session should produce one small, testable result and end with a report.
 | **2** ✅ | Licence, engine, ship | MIT + CC BY-NC-SA 4.0 licensing; Phaser 3.90.0 → 4.2.1 with verified behaviour parity; keyboard blur fix; public repo and GitHub Pages deploy. |
 | **3** ✅ | Talk to someone + Tiled pipeline | Strings JSON and `t()` (also setting `<title>` and `lang`); EarthBound-style text window (typewriter text, original or open-licence pixel font); NPCs placed from Tiled objects; action button checks the faced tile; y-sorted depth. Tiled pipeline: a real or exported tileset PNG at `public/assets/tilesets/tiles.png`, a verified Tiled open-and-save round trip, and an object-layer convention for NPCs. |
 | **4** ✅ | Font, zones and travel | Spleen 6x12 font (Latin-1). `above` tile layer. Map registry, warp and spawn objects in Tiled, fade transitions with input lock. Two disposable stub zones (`roosevelt-ave`, `diversity-plaza-74th`) connected to the test map; a world dataset replaces their layouts later. |
-| **5** | Delivery loop v1 | Order data model (JSON): pickup, dropoff, item, reward. Accept, pick up and deliver flow; on-screen order ticket. Orders send the player across zones. |
+| **5** ✅ | Delivery loop v1 | Order data model (JSON): pickup, dropoff, item, reward. Accept, pick up and deliver flow; on-screen order ticket. Orders send the player across zones. |
 | **6** | Saves and title | Versioned localStorage saves, autosave on zone change or delivery, title screen with Continue/New, settings stub (text speed). |
 | **7** | Battle system v1 | Encounter trigger; first-person menu battle scene; rolling HP counter; fictional gentrification-themed enemies from JSON; basic attack, defend and flee commands with original labels. |
 | **8** | Organizing moves and progression | Tenant-organizing specials (rent strike, petition, block party), a resource meter, XP and levels, status effects, balance pass. |

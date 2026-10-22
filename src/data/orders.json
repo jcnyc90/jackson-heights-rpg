@@ -1,0 +1,43 @@
+{
+  "orders": [
+    {
+      "id": "order-1",
+      "itemId": "order-1",
+      "reward": 10,
+      "pickup": { "map": "roosevelt-ave", "pointId": "rav-a" },
+      "dropoff": { "map": "diversity-plaza-74th", "pointId": "plaza-b" },
+      "text": {
+        "item": "item.order-1.name",
+        "assign": "order.order-1.assign",
+        "pickedUp": "order.order-1.picked-up",
+        "delivered": "order.order-1.delivered"
+      }
+    },
+    {
+      "id": "order-2",
+      "itemId": "order-2",
+      "reward": 15,
+      "pickup": { "map": "diversity-plaza-74th", "pointId": "plaza-a" },
+      "dropoff": { "map": "roosevelt-ave", "pointId": "rav-b" },
+      "text": {
+        "item": "item.order-2.name",
+        "assign": "order.order-2.assign",
+        "pickedUp": "order.order-2.picked-up",
+        "delivered": "order.order-2.delivered"
+      }
+    },
+    {
+      "id": "order-3",
+      "itemId": "order-3",
+      "reward": 20,
+      "pickup": { "map": "roosevelt-ave", "pointId": "rav-b" },
+      "dropoff": { "map": "diversity-plaza-74th", "pointId": "plaza-a" },
+      "text": {
+        "item": "item.order-3.name",
+        "assign": "order.order-3.assign",
+        "pickedUp": "order.order-3.picked-up",
+        "delivered": "order.order-3.delivered"
+      }
+    }
+  ]
+}

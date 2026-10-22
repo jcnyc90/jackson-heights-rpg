@@ -23,6 +23,7 @@ export const TEXTURES = {
   font: 'font',
   textWindow: 'text-window',
   textCursor: 'text-cursor',
+  deliveryPoint: 'delivery-point',
 } as const;
 
 /** Each half of a warp's fade (out, then in on the next map). Input is locked throughout. */
@@ -58,6 +59,15 @@ export const FONT = { key: TEXTURES.font, atlas: 'assets/fonts/spleen-6x12.png',
  * Text starts `padX`/`padY` inside the frame.
  */
 export const TEXT_WINDOW = { margin: 8, width: 240, height: 56, padX: 10, padY: 8 } as const;
+
+/**
+ * Order ticket, centred horizontally, in screen pixels. It sits `top` px from the top (under
+ * the map name card's row), or `margin` px from the bottom while the player is under it (near
+ * the map's top edge the camera stops scrolling, so the player can reach the top of the screen).
+ * Text starts `pad` px inside the box. The touch controls never cover it in either place
+ * (touch-check.js checks every order's ticket at both positions).
+ */
+export const ORDER_TICKET = { top: 24, margin: 4, pad: 3 } as const;
 
 /** Typewriter speed. 30 chars/s = one character every 2 frames at 60 fps. */
 export const TEXT_CHARS_PER_SECOND = 30;

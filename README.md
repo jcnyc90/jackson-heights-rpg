@@ -4,7 +4,7 @@ An EarthBound-inspired browser RPG set in Jackson Heights, Queens. Built with Ph
 
 Play it: <https://jcnyc90.github.io/jackson-heights-rpg/>
 
-> **Status: early scaffold.** There's a walkable test map and two rough stub zones (Roosevelt Avenue, Diversity Plaza) connected by warps with fades, collision, keyboard and touch controls, placeholder art generated in code, and placeholder NPCs you can talk to (EarthBound-style text window, Spleen pixel font). No story, quests, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
+> **Status: early scaffold.** There's a walkable test map and two rough stub zones (Roosevelt Avenue, Diversity Plaza) connected by warps with fades, collision, keyboard and touch controls, placeholder art generated in code, placeholder NPCs you can talk to (EarthBound-style text window, Spleen pixel font), and a first delivery loop with three placeholder orders. No story, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
 
 ## Requirements
 
@@ -28,6 +28,8 @@ Open <http://localhost:5173>. Add `?debug` to the URL to draw collision boxes (d
 | Action (talk / next page) | Space / Enter / Z | Round button |
 
 Touch controls appear only on touch devices. Face an NPC and press Action to talk; Action finishes the current page, then turns the page, then closes the window. You can't walk while the window is open.
+
+**Deliveries:** talk to the Dispatcher on the test map's south-east sidewalk to get an order. The ticket at the top of the screen shows where to go. Face the door marker at the pickup and press Action, then do the same at the dropoff. One order at a time; progress is lost on reload (no saves yet).
 
 Walk onto a warp to change maps: on the test map, the east end of the street leads to Roosevelt Avenue, and the gap in Roosevelt Avenue's north side leads to Diversity Plaza. Input is locked during the fade, and a key or D-pad held through it has to be pressed again.
 
@@ -93,9 +95,12 @@ src/
     strings.ts             t(id, params) lookup for all player-facing text
     textLayout.ts          word wrap + pagination for the text window
     npcs.ts                reads and validates NPCs from the Tiled "npcs" layer
+    orders.ts              loads and validates delivery orders
+    gameState.ts           in-memory state that survives warps: active order, deliveries, reward total
   data/
     strings/en.json        every player-facing string, keyed by ID
     dialogue.json          dialogue ID -> list of string IDs
+    orders.json            delivery orders: pickup, dropoff, item, reward, string IDs
     maps/index.json        map registry: id, file, display-name string ID; start point
     maps/*.json            Tiled maps (30x20), saved by Tiled 1.12: test-map, roosevelt-ave, diversity-plaza-74th
 public/assets/tilesets/    tiles.png + overhead.png: placeholder tilesets exported for Tiled (see Editing maps)
@@ -144,7 +149,7 @@ grep -nE "ISC License|Redistribution and use|Copyright \(c\)|@license" node_modu
 
 ## Editing maps
 
-Maps are Tiled JSON with embedded tilesets, listed in `src/data/maps/index.json`. The layer and property conventions are in [`docs/DESIGN.md` §2.4](docs/DESIGN.md#24-maps-tiled); warps and spawn points are in [§2.12](docs/DESIGN.md#212-maps-warps-and-zones-session-4).
+Maps are Tiled JSON with embedded tilesets, listed in `src/data/maps/index.json`. The layer and property conventions are in [`docs/DESIGN.md` §2.4](docs/DESIGN.md#24-maps-tiled); warps and spawn points are in [§2.12](docs/DESIGN.md#212-maps-warps-and-zones-session-4); delivery points and orders in [§2.13](docs/DESIGN.md#213-delivery-loop-session-5).
 
 The maps' tilesets point at `public/assets/tilesets/tiles.png` and `overhead.png`, pixel-exact exports of the placeholder tilesets that the game draws at runtime (regression checks H6 and O4 fail if they drift). The game itself doesn't load the PNGs yet; it will once real tiles replace the placeholders. They're under `public/assets/**`, so they're CC BY-NC-SA by path, but they're also exports of MIT placeholder art, so the MIT grant for that art still applies.
 

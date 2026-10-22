@@ -3,6 +3,8 @@ import {
   DIRECTIONS,
   FONT,
   GAME_HEIGHT,
+  GAME_WIDTH,
+  ORDER_TICKET,
   PLAYER_FEET,
   PLAYER_FRAME,
   PLAYER_SPEED,
@@ -12,8 +14,10 @@ import {
   type Direction,
 } from '../config';
 import { Controls } from '../systems/controls';
-import { insideWarp, resolveDestination, START, type MapInfo, type Warp } from '../systems/maps';
+import { gameState } from '../systems/gameState';
+import { getMap, insideWarp, resolveDestination, START, type DeliveryPoint, type MapInfo, type Warp } from '../systems/maps';
 import { DIALOGUE, readNpcSpawns, type NpcSpawn } from '../systems/npcs';
+import { orderParams } from '../systems/orders';
 import { t } from '../systems/strings';
 import type { DialogueData, DialogueScene } from './DialogueScene';
 
@@ -29,8 +33,8 @@ const OPPOSITE: Record<Direction, Direction> = { up: 'down', down: 'up', left: '
 const EMOTE_MS = 500;
 const NAME_CARD_MS = 1500;
 // Sprites sort by feet y (their depth). "ground" and "obstacles" stay below them; "above"
-// (tree canopies, awnings) draws over every sprite, and the emote and name card over that.
-const DEPTH = { ground: -2, obstacles: -1, above: 5e5, emote: 1e6, nameCard: 2e6 } as const;
+// (tree canopies, awnings) draws over every sprite, and the emote, order ticket and name card over that.
+const DEPTH = { ground: -2, obstacles: -1, above: 5e5, emote: 1e6, ticket: 1.5e6, nameCard: 2e6 } as const;
 
 interface Npc {
   spawn: NpcSpawn;
@@ -49,14 +53,22 @@ export interface MapSceneData {
  * Plays any map from the registry (src/data/maps/index.json). Map conventions (Tiled, see
  * DESIGN.md 2.4 and 2.12): tile layers "ground" and "obstacles" (tiles with the bool property
  * `collides`), an optional tile layer "above" drawn over sprites, an object layer "objects"
- * with spawn points and warps, and an optional object layer "npcs" (see readNpcSpawns).
+ * with spawn points, warps and delivery points, and an optional object layer "npcs" (see readNpcSpawns).
  *
  * A warp fades out, restarts this scene on the target map, and fades in. Input is locked
  * from the step onto the warp until the fade-in ends, and presses held across it go stale.
+ *
+ * Delivery orders (DESIGN.md 2.13): talking to a dispatcher NPC assigns the next order, and
+ * Action at a delivery point picks it up or delivers it. Order state lives in gameState, which
+ * survives the restart; the order ticket is rebuilt from it on every map.
  */
 export class MapScene extends Phaser.Scene {
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
   private emote!: Phaser.GameObjects.Image;
+  private ticketBox!: Phaser.GameObjects.Rectangle;
+  private ticketText!: Phaser.GameObjects.BitmapText;
+  /** The game state that survives warps (exposed here for the browser checks). */
+  readonly state = gameState;
   private controls!: Controls;
   private npcs: Npc[] = [];
   private info!: MapInfo;
@@ -119,7 +131,15 @@ export class MapScene extends Phaser.Scene {
       this.npcs.map((npc) => npc.sprite),
     );
 
+    // Delivery point markers sit on their rectangle's bottom edge and sort like sprites.
+    for (const p of info.deliveryPoints) {
+      this.add.image(p.x + p.width / 2, p.y + p.height, TEXTURES.deliveryPoint).setOrigin(0.5, 1).setDepth(p.y + p.height);
+    }
+
     this.emote = this.add.image(0, 0, TEXTURES.emote).setOrigin(0.5, 1).setVisible(false).setDepth(DEPTH.emote);
+    this.ticketBox = this.add.rectangle(0, 0, 0, 0, 0x2a1f3d).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.ticket);
+    this.ticketText = this.add.bitmapText(0, 0, FONT.key, '').setScrollFactor(0).setDepth(DEPTH.ticket + 1);
+    this.refreshTicket();
 
     this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
@@ -169,7 +189,9 @@ export class MapScene extends Phaser.Scene {
 
       if (action) {
         const npc = this.npcInFront();
+        const point = npc ? undefined : this.pointInFront();
         if (npc) this.startDialogue(npc);
+        else if (point) this.useDeliveryPoint(point);
         else {
           // Nobody to talk to: a "!" bubble confirms the input works.
           this.emote.setVisible(true);
@@ -186,6 +208,7 @@ export class MapScene extends Phaser.Scene {
       this.emote.setPosition(body.center.x, body.bottom - PLAYER_FRAME.height - 1);
       if (time >= this.emoteHideAt) this.emote.setVisible(false);
     }
+    if (this.ticketBox.visible) this.placeTicket();
   }
 
   /** The warp whose rectangle contains the centre of the player's feet box, if any. */
@@ -228,6 +251,42 @@ export class MapScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * The order ticket: the active order's item and status, and the map to go to next (the
+   * pickup's until it's picked up, then the dropoff's). Hidden with no active order.
+   */
+  private refreshTicket(): void {
+    const active = this.state.active;
+    this.ticketBox.setVisible(!!active);
+    this.ticketText.setVisible(!!active);
+    if (!active) return;
+    const { order, status } = active;
+    const stop = status === 'assigned' ? order.pickup : order.dropoff;
+    const lines = [
+      t(`hud.order.${status}`, { item: t(order.text.item) }),
+      t(`hud.go.${status}`, { map: t(getMap(stop.map)?.nameId ?? stop.map) }),
+    ];
+    this.ticketText.setText(lines.join('\n'));
+    const { pad } = ORDER_TICKET;
+    this.ticketBox.setSize(Math.max(...lines.map((l) => [...l].length)) * FONT.charWidth + 2 * pad, lines.length * FONT.lineHeight + 2 * pad);
+    this.placeTicket();
+  }
+
+  /** Centred at the top, or at the bottom while it would cover the player's sprite; whole pixels. */
+  private placeTicket(): void {
+    const { top, margin, pad } = ORDER_TICKET;
+    const { width, height } = this.ticketBox;
+    const x = Math.floor((GAME_WIDTH - width) / 2);
+    const cam = this.cameras.main;
+    const { body } = this.player;
+    const left = body.center.x - PLAYER_FRAME.width / 2 - cam.scrollX;
+    const feet = body.bottom - cam.scrollY;
+    const covered = left < x + width && left + PLAYER_FRAME.width > x && feet - PLAYER_FRAME.height < top + height && feet > top;
+    const y = covered ? GAME_HEIGHT - margin - height : top;
+    this.ticketBox.setPosition(x, y);
+    this.ticketText.setPosition(x + pad, y + pad);
+  }
+
   /** A sprite with a feet-sized physics body; position = feet, depth = feet y. */
   private addCharacter(x: number, y: number, texture: string, frame: number) {
     const sprite = this.physics.add.sprite(x, y, texture, frame).setOrigin(0.5, 1).setDepth(y);
@@ -247,19 +306,32 @@ export class MapScene extends Phaser.Scene {
     }
   }
 
-  /**
-   * The nearest NPC whose feet box overlaps the strip of TALK_RANGE px directly in
-   * front of the player's feet box, in the facing direction.
-   */
-  private npcInFront(): Npc | null {
+  /** The strip of TALK_RANGE px directly in front of the player's feet box, in the facing direction. */
+  private talkProbe(): Phaser.Geom.Rectangle {
     const b = this.player.body;
     const v = VELOCITY[this.facing];
-    const probe = new Phaser.Geom.Rectangle(
+    return new Phaser.Geom.Rectangle(
       v.x > 0 ? b.right : v.x < 0 ? b.x - TALK_RANGE : b.x,
       v.y > 0 ? b.bottom : v.y < 0 ? b.y - TALK_RANGE : b.y,
       v.x !== 0 ? TALK_RANGE : b.width,
       v.y !== 0 ? TALK_RANGE : b.height,
     );
+  }
+
+  /** The nearest delivery point whose rectangle overlaps the talk probe. */
+  private pointInFront(): DeliveryPoint | undefined {
+    const probe = this.talkProbe();
+    const { center } = this.player.body;
+    const dist = (p: DeliveryPoint) => Phaser.Math.Distance.Between(center.x, center.y, p.x + p.width / 2, p.y + p.height / 2);
+    return this.info.deliveryPoints
+      .filter((p) => Phaser.Geom.Rectangle.Overlaps(probe, new Phaser.Geom.Rectangle(p.x, p.y, p.width, p.height)))
+      .sort((a, b) => dist(a) - dist(b))[0];
+  }
+
+  /** The nearest NPC whose feet box overlaps the talk probe. */
+  private npcInFront(): Npc | null {
+    const b = this.player.body;
+    const probe = this.talkProbe();
     let best: Npc | null = null;
     let bestDist = Infinity;
     for (const npc of this.npcs) {
@@ -276,14 +348,42 @@ export class MapScene extends Phaser.Scene {
 
   private startDialogue(npc: Npc): void {
     const name = t(`npc.${npc.spawn.npcId}.name`);
+    const entries = DIALOGUE[npc.spawn.dialogueId].map((id) => t(id, { name }));
+    if (npc.spawn.role === 'dispatcher') entries.push(this.dispatch());
+    // The NPC turns to face the player.
+    npc.sprite.setFrame(this.npcFrame(npc.spawn, OPPOSITE[this.facing]));
+    this.openDialogue(entries);
+  }
+
+  /** The dispatcher assigns the next order (or says why not); returns their line. */
+  private dispatch(): string {
+    const result = this.state.assignNext();
+    this.refreshTicket();
+    if (result.kind === 'none-left') return t('dispatcher.none-left');
+    if (result.kind === 'busy') return t(`dispatcher.busy.${result.active.status}`, orderParams(result.active.order));
+    return t(result.order.text.assign, orderParams(result.order));
+  }
+
+  /** Action at a delivery point: pick up or deliver the active order, else a short "nothing here". */
+  private useDeliveryPoint(point: DeliveryPoint): void {
+    const result = this.state.interact(this.info.id, point.pointId);
+    this.refreshTicket();
+    const line =
+      result.kind === 'nothing'
+        ? t('delivery.nothing')
+        : result.kind === 'not-picked-up'
+          ? t('delivery.not-picked-up', orderParams(result.order))
+          : t(result.kind === 'picked-up' ? result.order.text.pickedUp : result.order.text.delivered, orderParams(result.order));
+    this.openDialogue([line]);
+  }
+
+  private openDialogue(entries: string[]): void {
     const data: DialogueData = {
-      entries: DIALOGUE[npc.spawn.dialogueId].map((id) => t(id, { name })),
+      entries,
       // Near the top edge of the map the camera stops scrolling, so the player can be in
       // the top half of the screen; move the window out of the way then.
       atBottom: this.player.y - this.cameras.main.scrollY < GAME_HEIGHT / 2,
     };
-    // The NPC turns to face the player.
-    npc.sprite.setFrame(this.npcFrame(npc.spawn, OPPOSITE[this.facing]));
     this.emote.setVisible(false);
     this.talking = true;
     this.scene.launch('Dialogue', data);

@@ -22,6 +22,11 @@ export function t(id: string, params?: Record<string, string | number>): string 
   return text.replace(/\{(\w+)\}/g, (match, key: string) => (key in params ? String(params[key]) : match));
 }
 
+/** True if the strings file has this ID (for data validation; t() itself never fails). */
+export function hasString(id: string): boolean {
+  return id in STRINGS;
+}
+
 /** Sets the page title and <html lang> from the strings file. */
 export function applyDocumentStrings(): void {
   document.documentElement.lang = t('app.lang');

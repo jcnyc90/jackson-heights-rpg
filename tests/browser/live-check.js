@@ -8,7 +8,9 @@
 //        all four warps (round trip test-map -> roosevelt-ave -> diversity-plaza-74th -> back),
 //        each arrival's name card and the accented font-test line, matched glyph by glyph
 //        against the shipped font atlas; plus no page errors and the Spleen notices.
-// Walk distances are in frames (1 frame = 1 px) from the spawn; they follow the session 4 maps.
+//        Session 5: then completes Order #1 (Dispatcher -> Roosevelt Ave pickup -> Diversity Plaza
+//        dropoff), reading the order ticket and each text-window line off the canvas, glyph by glyph.
+// Walk distances are in frames (1 frame = 1 px) from the spawn; they follow the session 4-5 maps.
 // Top-level await: evaluate as an async function body. Returns a results object.
 if (!window.__liveShim) {
   const html = await (await fetch(location.href, { cache: 'no-store' })).text();
@@ -68,10 +70,49 @@ if (!window.__liveShim) {
     const js = await (await fetch(R.bundle, { cache: 'no-store' })).text();
     R.noticesHaveSpleen = notices.includes('Spleen 6x12 2.2.0') && notices.includes('Frederic Cambus');
     R.bannerMentionsSpleen = js.slice(0, 600).includes('Spleen');
+
+    // ---- Session 5: one delivery order end to end ----
+    // Text window at the top (y=8) or bottom (y=160): text starts 10/8 px inside; a press finishes
+    // the page, the next turns it. Ticket: 2 lines, centred, text 3 px inside its box at y=24 (or bottom).
+    const winText = (lines, atBottom) => badGlyphs(lines, 8 + 10, (atBottom ? 224 - 8 - 56 : 8) + 8);
+    const ticketAt = (lines, y) => { const w = Math.max(...lines.map((l) => l.length)) * 6 + 6; return badGlyphs(lines, Math.floor((256 - w) / 2) + 3, y + 3); };
+    const page = () => { press(); pump(5); };   // finish typing the page
+    // From Neighbor C (56,288) facing down: east along y=288 to the Dispatcher (feet 440,288), stopped flush at x=430.
+    walk('ArrowRight', 380);
+    press(); pump(2); page();
+    R.order_dispatcherGreeting = winText(["I'm the Dispatcher. I hand out", 'delivery orders, one at a time.'], false);
+    press(); pump(2); page();
+    R.order_assignLine = winText(['Order #1 is ready for pickup at', 'Roosevelt Avenue. Bring it to', 'Diversity Plaza.'], false);
+    press(); pump(10);
+    const ticket1 = ['Order #1: not picked up', 'Pick up at Roosevelt Avenue'];
+    R.order_ticketAssigned = ticketAt(ticket1, 24);
+    // To the warp: south to y=304, east to x=456 (x=448-464 lane), north into the warp at the street.
+    walk('ArrowDown', 16); walk('ArrowRight', 26); warpWalk('ArrowUp', 200);
+    R.order_ticketAfterWarp1 = ticketAt(ticket1, 24);
+    // roosevelt-ave spawn (24,112): east to x=88, north to the wall (feet y=40), east to x=96 under the
+    // pickup door (Neighbor D stands at x=104 below it), then face the door.
+    walk('ArrowRight', 64); walk('ArrowUp', 80); walk('ArrowRight', 8); walk('ArrowUp', 1);
+    R.order_ticketMovesDown = ticketAt(ticket1, 224 - 4 - 30);
+    press(); pump(2); page();
+    R.order_pickedUpLine = winText(['You picked up Order #1. Bring it to', 'Diversity Plaza.'], true);
+    press(); pump(10);
+    const ticket2 = ['Order #1: picked up', 'Deliver to Diversity Plaza'];
+    R.order_ticketPickedUp = ticketAt(ticket2, 224 - 4 - 30);
+    // East along the sidewalk to x=240, north into the 74th St gap.
+    walk('ArrowRight', 144); warpWalk('ArrowUp', 40);
+    R.order_ticketAfterWarp2 = ticketAt(ticket2, 24);
+    // diversity-plaza-74th spawn (240,304): east to x=328, face down at the dropoff door.
+    walk('ArrowRight', 88); walk('ArrowDown', 2);
+    press(); pump(2); page();
+    R.order_deliveredLine = winText(['You delivered Order #1. Nice work!'], false);
+    press(); pump(10);
+    // Ticket gone: no ticket-box pixels left where its text sat.
+    const px = snap(); let box = 0; for (let y = 27; y < 51; y++) for (let x = 47; x < 209; x++) if (rgbAt(px, x, y) === 0x2a1f3d) box++;
+    R.order_ticketHiddenAfterDelivery = box < 40;
   } catch (e) { R.ERROR = String(e && e.stack || e); }
   R.errors = window.__errors;
   R.framesPumped = frames;
-  const glyphChecks = Object.keys(R).filter((k) => /^warp\d|^accentedText/.test(k));
-  R.summary = glyphChecks.every((k) => Array.isArray(R[k]) && R[k].length === 0) && R.fadeReachedBlack && R.noticesHaveSpleen && R.bannerMentionsSpleen && R.errors.length === 0 && !R.ERROR ? 'PASS' : 'FAIL';
+  const glyphChecks = Object.keys(R).filter((k) => /^warp\d|^accentedText|^order_(?!ticketHidden)/.test(k));
+  R.summary = glyphChecks.every((k) => Array.isArray(R[k]) && R[k].length === 0) && R.order_ticketHiddenAfterDelivery && R.fadeReachedBlack && R.noticesHaveSpleen && R.bannerMentionsSpleen && R.errors.length === 0 && !R.ERROR ? 'PASS' : 'FAIL';
   R;
 }

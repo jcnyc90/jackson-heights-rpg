@@ -1,6 +1,7 @@
 // Desktop behaviour regression suite. A-G: sessions 1-2 (45 checks). H-M: session 3
 // (strings, font, tileset export, dialogue, NPC targeting/collision, depth sorting).
 // N-P: session 4 (Spleen font, "above" tile layer, map registry, warps, fades, zones).
+// Q: session 5 (delivery orders: data checks, state machine, end to end across warps, order ticket).
 // Deterministic: pauses Phaser's rAF loop and advances frames manually at exactly 60 fps via
 // game.step(time, delta), so results don't depend on the browser pane being visible.
 // Run on the dev server (needs the DEV-only window.game hook); see tests/browser/README.md.
@@ -383,12 +384,141 @@ try {
     zoneTalk[m.id] = [s.npcs.length, s.talking && g.scene.isActive('Dialogue'), D().pages[0].replace(/\n/g, ' ').includes(name), n0.sprite.frame.name % 4];
     closeDialogue(); zoneTalk[m.id].push(s.talking);
   }
-  check('P8 dialogue works in each map (opens, names the NPC, NPC turns, closes)', zoneTalk, { 'test-map': [3, true, true, 0, false], 'roosevelt-ave': [1, true, true, 0, false], 'diversity-plaza-74th': [1, true, true, 0, false] });
+  // Session 5 added the Dispatcher to test-map (4 NPCs; s.npcs[0] is still Neighbor A).
+  check('P8 dialogue works in each map (opens, names the NPC, NPC turns, closes)', zoneTalk, { 'test-map': [4, true, true, 0, false], 'roosevelt-ave': [1, true, true, 0, false], 'diversity-plaza-74th': [1, true, true, 0, false] });
+
+  // ---- Session 5 ----
+  const ORD = await import('/src/systems/orders.ts');
+  const GS = await import('/src/systems/gameState.ts');
+  const NPCS = await import('/src/systems/npcs.ts');
+  const ticketShown = () => s.ticketText.visible && s.ticketBox.visible;
+  const ticket = () => (ticketShown() ? s.ticketText.text.split('\n') : null);
+  const lastPage = () => D().pages.join(' ').replace(/\n/g, ' ');
+  // Opens the window with Action, reads every page, closes it; returns the text shown.
+  const talkAll = () => { press(); let text = ''; for (let n = 0; s.talking && n < 30; n++) { if (D().pageComplete() && !text.includes(D().pages[D().page])) text += D().pages[D().page].replace(/\n/g, ' ') + ' | '; press(); } run(100); return text; };
+  s.state.reset(); gotoMap('test-map');
+
+  // Q1. Order data: 2-3 orders; the pickup is off the dispatcher's map and the dropoff off the pickup's map,
+  // so each order needs at least one warp per leg; every map's points are drawn.
+  const dispatcherMap = 'test-map';
+  check('Q1 orders: 3 loaded, every leg crosses a warp, each map draws its delivery points',
+    [ORD.ORDERS.map((o) => o.id), ORD.ORDERS.every((o) => o.pickup.map !== dispatcherMap && o.dropoff.map !== o.pickup.map), s.npcs.filter((n) => n.spawn.role === 'dispatcher').map((n) => n.spawn.npcId),
+      M.MAP_LIST.map((m) => m.deliveryPoints.map((p) => p.pointId))],
+    [['order-1', 'order-2', 'order-3'], true, ['dispatcher'], [[], ['rav-a', 'rav-b'], ['plaza-a', 'plaza-b']]]);
+
+  // Q2. State machine, on a fresh GameState over the real orders.
+  const st = new GS.GameState(ORD.ORDERS); const log = [];
+  const k = (r) => r.kind + (r.order ? ':' + r.order.id : '');
+  log.push(k(st.interact('roosevelt-ave', 'rav-a')));            // no order yet
+  log.push(k(st.assignNext()), k(st.assignNext()));                // assign, then busy
+  log.push(k(st.interact('diversity-plaza-74th', 'plaza-b')));    // dropoff before pickup
+  log.push(k(st.interact('roosevelt-ave', 'rav-b')));             // some other point
+  log.push(k(st.interact('diversity-plaza-74th', 'rav-a')));      // right pointId, wrong map
+  log.push(k(st.interact('roosevelt-ave', 'rav-a')), st.active.status, k(st.interact('roosevelt-ave', 'rav-a')));  // pick up, then again
+  log.push(k(st.interact('diversity-plaza-74th', 'plaza-b')), st.active, st.rewardTotal);  // deliver
+  for (const o of ORD.ORDERS.slice(1)) { st.assignNext(); st.interact(o.pickup.map, o.pickup.pointId); st.interact(o.dropoff.map, o.dropoff.pointId); }
+  log.push(k(st.assignNext()), st.completed, st.rewardTotal, st.active);
+  check('Q2 order state machine: assign -> busy -> pick up -> deliver, wrong points do nothing, then none left', log,
+    ['nothing', 'assigned:order-1', 'busy', 'not-picked-up:order-1', 'nothing', 'nothing', 'picked-up:order-1', 'picked-up', 'nothing', 'delivered:order-1', null, 10,
+      'none-left', ['order-1', 'order-2', 'order-3'], 45, null]);
+
+  // Q3. Malformed or broken orders fail loudly in dev (strict) and are skipped with a warning in production.
+  const good = JSON.parse(JSON.stringify(ORD.ORDERS[0]));
+  const variant = (f) => { const o = JSON.parse(JSON.stringify(good)); f(o); return { orders: [o] }; };
+  const BAD = {
+    noArray: {},
+    reward: variant((o) => { o.reward = '10'; }),
+    unknownMap: variant((o) => { o.dropoff.map = 'no-such-map'; }),
+    unknownPoint: variant((o) => { o.pickup.pointId = 'no-such-point'; }),
+    missingString: variant((o) => { o.text.assign = 'order.no-such-string'; }),
+    samePoint: variant((o) => { o.dropoff = { ...o.pickup }; }),
+    duplicateId: { orders: [good, good] },
+  };
+  const strictMsgs3 = Object.fromEntries(Object.entries(BAD).map(([key, raw]) => [key, throwsMsg(() => ORD.parseOrders(raw, true))]));
+  const warns3 = []; const ow3 = console.warn; console.warn = (...a) => warns3.push(a.join(' '));
+  const lenient = ORD.parseOrders({ orders: [good, BAD.unknownMap.orders[0], BAD.reward.orders[0], good] }, false).map((o) => o.id);
+  console.warn = ow3;
+  check('Q3 bad orders throw in dev with a clear message', strictMsgs3, {
+    noArray: 'orders.json: needs an "orders" array',
+    reward: 'orders.json, order 0 ("order-1"): reward must be a number >= 0',
+    unknownMap: 'orders.json, order 0 ("order-1"): dropoff names unknown map "no-such-map"',
+    unknownPoint: 'orders.json, order 0 ("order-1"): map "roosevelt-ave" has no delivery point "no-such-point"',
+    missingString: 'orders.json, order 0 ("order-1"): text.assign names missing string "order.no-such-string"',
+    samePoint: 'orders.json, order 0 ("order-1"): pickup and dropoff are the same point',
+    duplicateId: 'orders.json, order 1 ("order-1"): duplicate id',
+  });
+  check('Q3b production: bad orders are skipped with one warning each, good ones kept', [lenient, warns3.length], [['order-1'], 3]);
+  const objLayer = (objects) => ({ layers: [{ name: 'objects', type: 'objectgroup', objects: [{ id: 1, type: 'spawn', point: true, x: 8, y: 8, properties: [{ name: 'spawnId', value: 'a' }, { name: 'facing', value: 'up' }] }, ...objects] }] });
+  const dp = (id, extra = {}) => ({ id, name: 'p', type: 'deliveryPoint', x: 0, y: 0, width: 16, height: 16, properties: [{ name: 'pointId', value: 'x' }], ...extra });
+  const fakeMap = (props) => ({ getObjectLayer: () => ({ objects: [{ id: 9, point: true, x: 0, y: 0, properties: Object.entries(props).map(([name, value]) => ({ name, value })) }] }) });
+  check('Q3c malformed delivery points and NPC roles throw at load',
+    [throwsMsg(() => M.readObjects('fx', objLayer([dp(2, { point: true, width: 0, height: 0 })]))), throwsMsg(() => M.readObjects('fx', objLayer([dp(2, { properties: [] })]))),
+      throwsMsg(() => M.readObjects('fx', objLayer([dp(2), dp(3)]))), throwsMsg(() => NPCS.readNpcSpawns(fakeMap({ npcId: 'q', dialogueId: 'neighbor-a.hello', facing: 'up', role: 'boss' })))],
+    ['Map "fx", object 2 ("p"): a delivery point must be a rectangle', 'Map "fx", object 2 ("p"): needs string property "pointId"', 'Map "fx", object 3 ("p"): duplicate pointId "x"',
+      'NPC object 9 in layer "npcs": role must be one of dispatcher']);
+
+  // Q4. End to end in the game: Dispatcher -> warp -> pick up -> warp -> deliver. State and ticket survive each warp.
+  s.state.reset(); gotoMap('test-map');
+  const e2e = { before: [ticket(), s.state.active] };
+  const disp = s.npcs.find((n) => n.spawn.role === 'dispatcher');
+  place(disp.spawn.x - 16, disp.spawn.y, 'right');
+  e2e.dispatcher = talkAll(); e2e.afterAssign = [ticket(), s.state.active?.order.id, s.state.active?.status];
+  e2e.dispatcherAgain = talkAll();
+  walkWarp('test-map', mapById('test-map').warps[0]);
+  e2e.afterWarp1 = [s.info.id, ticket(), s.state.active?.status];
+  place(104, 40, 'right'); e2e.facingAway = talkAll();                         // point is north; facing east does nothing
+  place(328, 240, 'down'); e2e.otherPoint = talkAll();                        // rav-b: not this order's point
+  place(104, 40, 'up'); e2e.pickup = talkAll(); e2e.afterPickup = [ticket(), s.state.active?.status];
+  walkWarp('roosevelt-ave', mapById('roosevelt-ave').warps.find((w) => w.targetMap === 'diversity-plaza-74th'));
+  e2e.afterWarp2 = [s.info.id, ticket(), s.state.active?.status];
+  place(328, 304, 'down'); e2e.deliver = talkAll();
+  e2e.after = [ticket(), s.state.active, s.state.completed, s.state.rewardTotal];
+  check('Q4 end to end: assign at the Dispatcher, pick up and deliver across two warps; state and ticket survive warps', e2e, {
+    before: [null, null],
+    dispatcher: "I'm the Dispatcher. I hand out delivery orders, one at a time. | Order #1 is ready for pickup at Roosevelt Avenue. Bring it to Diversity Plaza. | ",
+    afterAssign: [['Order #1: not picked up', 'Pick up at Roosevelt Avenue'], 'order-1', 'assigned'],
+    dispatcherAgain: "I'm the Dispatcher. I hand out delivery orders, one at a time. | You still have Order #1 to pick up at Roosevelt Avenue. | ",
+    afterWarp1: ['roosevelt-ave', ['Order #1: not picked up', 'Pick up at Roosevelt Avenue'], 'assigned'],
+    facingAway: '',
+    otherPoint: 'Nothing here. | ',
+    pickup: 'You picked up Order #1. Bring it to Diversity Plaza. | ',
+    afterPickup: [['Order #1: picked up', 'Deliver to Diversity Plaza'], 'picked-up'],
+    afterWarp2: ['diversity-plaza-74th', ['Order #1: picked up', 'Deliver to Diversity Plaza'], 'picked-up'],
+    deliver: 'You delivered Order #1. Nice work! | ',
+    after: [null, null, ['order-1'], 10],
+  });
+  // Q5. Dropoff before pickup, and the "nothing here" line with no active order.
+  s.state.assignNext(); gotoMap('roosevelt-ave'); place(328, 240, 'down'); const early = talkAll();
+  s.state.reset(); gotoMap('roosevelt-ave'); place(104, 40, 'up'); const noOrder = talkAll();
+  check('Q5 dropoff before pickup explains; a point with no active order says nothing here', [early, noOrder, s.state.active],
+    ["Order #2 goes here, but you haven't picked it up yet. It's at Diversity Plaza. | ", 'Nothing here. | ', null]);
+
+  // Q6. Order ticket: drawn pixel-exact at whole pixels, top-left under the name card, over the map; hidden with no order.
+  s.state.reset(); s.state.assignNext(); gotoMap('roosevelt-ave'); run(1600); run(FRAME);
+  const tPx = snap(); const tLines = ticket(); const tBad = [];
+  tLines.forEach((line, row) => [...line].forEach((ch, col) => {
+    for (let y = 0; y < 12; y++) for (let x = 0; x < 6; x++) if (rgbAt(tPx, s.ticketText.x + col * 6 + x, s.ticketText.y + row * 12 + y) !== (bit(ch.charCodeAt(0), x, y) ? 0xfffaf0 : 0x2a1f3d)) { tBad.push(ch); return; }
+  }));
+  const tb = s.ticketBox;
+  check('Q6 ticket: whole-pixel box centred at y=24 (under the name card row), pixel-exact text, fixed to the screen, over sprites and canopies, under the name card',
+    [[tb.x, tb.y, tb.width, tb.height], tBad, [tb.scrollFactorX, s.ticketText.scrollFactorX], tb.depth > layerOf('above').depth && tb.depth > s.emote.depth, tb.y >= 4 + 12 + 6, tb.depth < 2e6],
+    [[44, 24, 6 * 27 + 6, 2 * 12 + 6], [], [0, 0], true, true, true]);
+  // Q6c (x=88 stays clear of Neighbor D). Near the map's top edge the camera stops scrolling and the player reaches the top of the screen: the ticket moves to the bottom.
+  const sprite = () => { const c = s.cameras.main; return [s.player.x - 8 - c.scrollX, s.player.y - 24 - c.scrollY, 16, 24]; };
+  const hits = (a, b) => a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1];
+  const tRect = () => [tb.x, tb.y, tb.width, tb.height];
+  const ticketLog = []; at(88, 112); ev('keydown', 'ArrowUp');
+  for (let i = 0; i < 90; i++) { run(FRAME); ticketLog.push([tb.y, hits(sprite(), tRect())]); } ev('keyup', 'ArrowUp'); run(50);
+  const atTop = [s.player.y, tb.y, hits(sprite(), tRect())]; ev('keydown', 'ArrowDown'); run(1000); ev('keyup', 'ArrowDown'); run(50);
+  check('Q6c ticket moves to the bottom while the player is under it, never covers the player, and comes back',
+    [atTop, ticketLog.every(([, hit]) => !hit), [...new Set(ticketLog.map(([y]) => y))], tb.y], [[40, 224 - 4 - 30, false], true, [24, 190], 24]);
+  s.state.reset(); gotoMap('roosevelt-ave'); run(FRAME);
+  check('Q6b ticket hidden with no active order', [ticketShown(), s.ticketBox.visible, s.ticketText.visible], [false, false, false]);
 } catch (e) {
   R.ERROR = String(e && e.stack || e);
 } finally {
   for (let n = 0; s.talking && n < 30; n++) { ev('keydown', 'Space'); run(FRAME); ev('keyup', 'Space'); run(FRAME); }
-  if (s.info.id !== 'test-map' || s.warping) { s.scene.restart({}); run(100); }
+  s.state?.reset(); s.scene.restart({}); run(100);
   at(232, 268); s.facing = 'down';
   g.loop.wake();
 }

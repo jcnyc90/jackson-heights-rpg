@@ -26,6 +26,16 @@ export interface Warp {
   height: number;
 }
 
+/** A rectangle the player can face and press Action at, e.g. a door; orders name it by pointId. */
+export interface DeliveryPoint {
+  objectId: number;
+  pointId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface MapInfo {
   id: string;
   /** String ID of the display name (t()). */
@@ -35,6 +45,7 @@ export interface MapInfo {
   /** In map order; the first one is the fallback for an unknown spawn ID. */
   spawns: Spawn[];
   warps: Warp[];
+  deliveryPoints: DeliveryPoint[];
 }
 
 export interface Destination {
@@ -57,16 +68,17 @@ interface TiledObject {
 export const OBJECT_LAYER = 'objects';
 
 /**
- * Reads spawns and warps from the "objects" layer. Objects are told apart by class
- * (`type` in Tiled JSON): "spawn" points carry spawnId and facing, "warp" rectangles carry
- * targetMap and targetSpawn. Malformed objects throw in every build, like NPCs do; a broken
- * map should never ship.
+ * Reads spawns, warps and delivery points from the "objects" layer. Objects are told apart
+ * by class (`type` in Tiled JSON): "spawn" points carry spawnId and facing, "warp" rectangles
+ * carry targetMap and targetSpawn, "deliveryPoint" rectangles carry pointId. Malformed objects
+ * throw in every build, like NPCs do; a broken map should never ship.
  */
-function readObjects(mapId: string, data: { layers?: { name: string; type: string; objects?: TiledObject[] }[] }) {
+export function readObjects(mapId: string, data: { layers?: { name: string; type: string; objects?: TiledObject[] }[] }) {
   const layer = data.layers?.find((l) => l.name === OBJECT_LAYER && l.type === 'objectgroup');
   if (!layer?.objects) throw new Error(`Map "${mapId}" needs an object layer "${OBJECT_LAYER}"`);
   const spawns: Spawn[] = [];
   const warps: Warp[] = [];
+  const deliveryPoints: DeliveryPoint[] = [];
   for (const obj of layer.objects) {
     const where = `Map "${mapId}", object ${obj.id} ("${obj.name ?? ''}")`;
     const props = new Map((obj.properties ?? []).map((p) => [p.name, p.value]));
@@ -86,12 +98,18 @@ function readObjects(mapId: string, data: { layers?: { name: string; type: strin
       const { width = 0, height = 0 } = obj;
       if (obj.point || width <= 0 || height <= 0) throw new Error(`${where}: a warp must be a rectangle`);
       warps.push({ objectId: obj.id, targetMap: str('targetMap'), targetSpawn: str('targetSpawn'), x: obj.x, y: obj.y, width, height });
+    } else if (obj.type === 'deliveryPoint') {
+      const { width = 0, height = 0 } = obj;
+      const pointId = str('pointId');
+      if (obj.point || width <= 0 || height <= 0) throw new Error(`${where}: a delivery point must be a rectangle`);
+      if (deliveryPoints.some((p) => p.pointId === pointId)) throw new Error(`${where}: duplicate pointId "${pointId}"`);
+      deliveryPoints.push({ objectId: obj.id, pointId, x: obj.x, y: obj.y, width, height });
     } else {
-      throw new Error(`${where}: class must be "spawn" or "warp", not "${obj.type ?? ''}"`);
+      throw new Error(`${where}: class must be "spawn", "warp" or "deliveryPoint", not "${obj.type ?? ''}"`);
     }
   }
   if (spawns.length === 0) throw new Error(`Map "${mapId}" needs at least one spawn point`);
-  return { spawns, warps };
+  return { spawns, warps, deliveryPoints };
 }
 
 const MAPS = new Map<string, MapInfo>();
@@ -103,6 +121,11 @@ for (const entry of registry.maps) {
 }
 
 export const MAP_LIST: readonly MapInfo[] = [...MAPS.values()];
+
+/** The registered map with this ID, if any. */
+export function getMap(mapId: string): MapInfo | undefined {
+  return MAPS.get(mapId);
+}
 
 /** True if the point (e.g. the player's feet centre) is inside the warp's rectangle. */
 export function insideWarp(warp: Warp, x: number, y: number): boolean {

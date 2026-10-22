@@ -193,6 +193,42 @@
                  "width":0,
                  "x":240,
                  "y":48
+                }, 
+                {
+                 "height":16,
+                 "id":6,
+                 "name":"point-rav-a",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"pointId",
+                         "type":"string",
+                         "value":"rav-a"
+                        }],
+                 "rotation":0,
+                 "type":"deliveryPoint",
+                 "visible":true,
+                 "width":16,
+                 "x":96,
+                 "y":16
+                }, 
+                {
+                 "height":16,
+                 "id":7,
+                 "name":"point-rav-b",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"pointId",
+                         "type":"string",
+                         "value":"rav-b"
+                        }],
+                 "rotation":0,
+                 "type":"deliveryPoint",
+                 "visible":true,
+                 "width":16,
+                 "x":320,
+                 "y":240
                 }],
          "opacity":1,
          "type":"objectgroup",
@@ -246,7 +282,7 @@
          "y":0
         }],
  "nextlayerid":6,
- "nextobjectid":6,
+ "nextobjectid":8,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.12.2",

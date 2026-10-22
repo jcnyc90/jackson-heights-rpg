@@ -146,6 +146,42 @@
                  "width":0,
                  "x":240,
                  "y":304
+                }, 
+                {
+                 "height":16,
+                 "id":4,
+                 "name":"point-plaza-a",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"pointId",
+                         "type":"string",
+                         "value":"plaza-a"
+                        }],
+                 "rotation":0,
+                 "type":"deliveryPoint",
+                 "visible":true,
+                 "width":16,
+                 "x":160,
+                 "y":16
+                }, 
+                {
+                 "height":16,
+                 "id":5,
+                 "name":"point-plaza-b",
+                 "opacity":1,
+                 "properties":[
+                        {
+                         "name":"pointId",
+                         "type":"string",
+                         "value":"plaza-b"
+                        }],
+                 "rotation":0,
+                 "type":"deliveryPoint",
+                 "visible":true,
+                 "width":16,
+                 "x":320,
+                 "y":304
                 }],
          "opacity":1,
          "type":"objectgroup",
@@ -199,7 +235,7 @@
          "y":0
         }],
  "nextlayerid":6,
- "nextobjectid":4,
+ "nextobjectid":6,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.12.2",

@@ -352,7 +352,30 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
 
   make(TEXTURES.textWindow, TEXT_WINDOW.width, TEXT_WINDOW.height, (ctx) => drawWindow(ctx, TEXT_WINDOW.width, TEXT_WINDOW.height));
   make(TEXTURES.textCursor, CURSOR[0].length, CURSOR.length, (ctx) => pixelMap(ctx, 0, 0, CURSOR, { W: C.white }));
+  make(TEXTURES.deliveryPoint, DELIVERY_POINT[0].length, DELIVERY_POINT.length, (ctx) =>
+    pixelMap(ctx, 0, 0, DELIVERY_POINT, { o: C.outline, D: C.trunk, d: C.bag, W: C.white }),
+  );
 }
+
+// Delivery point marker (16x16): a door with a parcel sign, drawn over a wall tile.
+const DELIVERY_POINT = [
+  '................',
+  '..oooooooooooo..',
+  '..oDDDDDDDDDDo..',
+  '..oDddddddddDo..',
+  '..oDdoooooodDo..',
+  '..oDdoWWWWodDo..',
+  '..oDdoWooWodDo..',
+  '..oDdoWWWWodDo..',
+  '..oDdoooooodDo..',
+  '..oDddddddddDo..',
+  '..oDdddddddoDo..',
+  '..oDddddddddDo..',
+  '..oDddddddddDo..',
+  '..oDddddddddDo..',
+  '..oDDDDDDDDDDo..',
+  '..oooooooooooo..',
+];
 
 // ---------------------------------------------------------------------------
 // Text window: dark panel, light 2px frame, outline, rounded corners.
