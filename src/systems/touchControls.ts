@@ -3,6 +3,8 @@ import type { Direction } from '../config';
 /** Touch input state, written by DOM pointer events and read by Controls each frame. */
 export const touchState = {
   direction: null as Direction | null,
+  /** Counts D-pad presses (new pointer down), so a lock can tell a held press from a new one. */
+  dpadPresses: 0,
   actionQueued: false,
   /** Returns true once per action-button press. */
   takeAction(): boolean {
@@ -60,6 +62,7 @@ export function initTouchControls(): void {
     e.preventDefault();
     if (dpadPointer !== null) return;
     dpadPointer = e.pointerId;
+    touchState.dpadPresses++;
     updateDirection(e);
   });
   // Listen on window so a thumb sliding off the pad still updates/releases it.

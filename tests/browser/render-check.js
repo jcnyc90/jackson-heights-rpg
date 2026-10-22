@@ -2,9 +2,10 @@
 // canvas back, and reports per shot: an FNV-1a hash of the RGBA pixels, and how many pixels
 // are NOT exact palette colours (any blending/smoothing/sub-pixel sampling shows up there).
 // Session 3: hides NPCs for the session-2 parity shots, then adds an NPC + text-window shot.
+// Session 4: the tree redraw and canopies change the map shots; the dialogue shot changes only in its glyphs.
 // Async: returns a Promise of the results object.
 const PALETTE = ["#2a1f3d","#a6e3a1","#7fc98a","#f6dccb","#dcb9a8","#9a98c2","#86849f","#fff1a6","#ef9f95","#cf7f7a","#b5e3f5","#7dd3a0","#58b07f","#b07c62","#c7a6e6","#a585c6","#ff9fc6","#ffe28a","#94d8f5","#e0f6ff","#fffaf0","#c98d63","#3b2a2a","#ff8f7a","#6fcfc4","#6a76b8","#ffd46e","#1b1528","#f0c39a","#8a5a3c"];
-const g = window.game; const s = g.scene.getScene('TestMap');
+const g = window.game; const s = g.scene.getScene('Map');
 const FRAME = 1000 / 60; let T = performance.now();
 const pal = new Set(PALETTE.map((h) => parseInt(h.slice(1), 16)));
 g.loop.sleep();
@@ -22,7 +23,7 @@ s.player.body.reset(456, 304); settle(); shots['corner-bottom-right'] = grab();
 s.player.body.reset(232, 268); settle(); s.emote.setVisible(true); s.emoteHideAt = Infinity; T += FRAME; g.step(T, FRAME); shots['emote'] = grab(); s.emote.setVisible(false); s.emoteHideAt = 0;
 s.npcs.forEach((n) => n.sprite.setVisible(true));
 s.player.body.reset(186, 256); s.facing = 'left'; settle();
-s.scene.launch('Dialogue', { entries: ['Render check: placeholder font, window frame and cursor.'] }); settle(2);
+s.scene.launch('Dialogue', { entries: ['Render check: placeholder font, window frame and cursor.'] }); settle(2); // session 3 text, kept so the shot is comparable
 g.scene.getScene('Dialogue').advance(); settle(2); shots['npc-dialogue'] = grab();
 s.scene.stop('Dialogue'); s.facing = 'down';
 s.player.body.reset(232, 268); settle();

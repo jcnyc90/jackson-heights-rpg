@@ -4,7 +4,7 @@ An EarthBound-inspired browser RPG set in Jackson Heights, Queens. Built with Ph
 
 Play it: <https://jcnyc90.github.io/jackson-heights-rpg/>
 
-> **Status: early scaffold.** There's a walkable test map with collision, keyboard and touch controls, placeholder art generated in code, and three placeholder NPCs you can talk to (EarthBound-style text window). No story, quests, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
+> **Status: early scaffold.** There's a walkable test map and two rough stub zones (Roosevelt Avenue, Diversity Plaza) connected by warps with fades, collision, keyboard and touch controls, placeholder art generated in code, and placeholder NPCs you can talk to (EarthBound-style text window, Spleen pixel font). No story, quests, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
 
 ## Requirements
 
@@ -28,6 +28,8 @@ Open <http://localhost:5173>. Add `?debug` to the URL to draw collision boxes (d
 | Action (talk / next page) | Space / Enter / Z | Round button |
 
 Touch controls appear only on touch devices. Face an NPC and press Action to talk; Action finishes the current page, then turns the page, then closes the window. You can't walk while the window is open.
+
+Walk onto a warp to change maps: on the test map, the east end of the street leads to Roosevelt Avenue, and the gap in Roosevelt Avenue's north side leads to Diversity Plaza. Input is locked during the fade, and a key or D-pad held through it has to be pressed again.
 
 ### Test on a phone
 
@@ -79,23 +81,28 @@ src/
   config.ts                resolution, tile size, texture keys, sprite layout
   style.css                full-screen layout, touch controls
   scenes/
-    BootScene.ts           load data, generate placeholder art and font, register animations
-    TestMapScene.ts        walkable test map, NPCs, talking, depth sorting
+    BootScene.ts           load maps and the font atlas, generate placeholder art, register animations
+    MapScene.ts            plays any registered map: movement, NPCs, talking, depth sorting, warps + fades
     DialogueScene.ts       text window (typewriter, pages), launched over the map
   systems/
     controls.ts            keyboard + touch -> direction / action
     touchControls.ts       on-screen D-pad + action button (DOM)
     placeholderArt.ts      code-drawn placeholder tiles, sprites and window frame
-    placeholderFont.ts     code-drawn placeholder pixel font
+    font.ts                registers the Spleen 6x12 atlas as a bitmap font; character set
+    maps.ts                map registry, spawn points and warps from Tiled, link checks
     strings.ts             t(id, params) lookup for all player-facing text
     textLayout.ts          word wrap + pagination for the text window
     npcs.ts                reads and validates NPCs from the Tiled "npcs" layer
   data/
     strings/en.json        every player-facing string, keyed by ID
     dialogue.json          dialogue ID -> list of string IDs
-    maps/test-map.json     Tiled map (30x20), saved by Tiled 1.12
-public/assets/tilesets/tiles.png  placeholder tileset exported for Tiled (see Editing maps)
-tests/browser/             regression, render and touch checks (run in the dev server)
+    maps/index.json        map registry: id, file, display-name string ID; start point
+    maps/*.json            Tiled maps (30x20), saved by Tiled 1.12: test-map, roosevelt-ave, diversity-plaza-74th
+public/assets/tilesets/    tiles.png + overhead.png: placeholder tilesets exported for Tiled (see Editing maps)
+public/assets/fonts/spleen-6x12.png  font atlas, generated from the BDF (third-party, BSD-2-Clause)
+third_party/spleen-2.2.0/  Spleen 6x12 BDF and LICENSE, unmodified from the 2.2.0 release (SOURCE.txt)
+scripts/build-font-atlas.mjs  BDF -> PNG atlas converter (no dependencies)
+tests/browser/             regression, render, touch and live-site checks
 public/THIRD-PARTY-NOTICES.txt  licences of bundled third-party code (served with the game)
 docs/DESIGN.md             locked decisions, conventions, Phaser 4 notes, roadmap
 LICENSE                    MIT (code)
@@ -119,16 +126,17 @@ Code and content are licensed separately. Copyright (c) 2026 jcnyc90.
 
 | License | Applies to |
 |---------|------------|
-| **MIT** ([`LICENSE`](LICENSE)) — code | `src/**` except `src/data/**` (including `src/systems/placeholderArt.ts` and `src/systems/placeholderFont.ts`: their code-drawn placeholder art and font are MIT like the rest of the code, and replacing them later doesn't revoke that), `tests/**`, `src/style.css`, `index.html`, build and tooling files (`package.json`, `package-lock.json`, `tsconfig.json`, `vite.config.ts`, `.github/**`, dotfiles), and this `README.md` |
-| **CC BY-NC-SA 4.0** ([`LICENSE-CONTENT`](LICENSE-CONTENT)) — content | `src/data/**` (maps now; dialogue, story text and other game data later), `public/assets/**` (art, audio), and `docs/**` (design and narrative documents) |
+| **MIT** ([`LICENSE`](LICENSE)) — code | `src/**` except `src/data/**` (including `src/systems/placeholderArt.ts`: its code-drawn placeholder art is MIT like the rest of the code, and replacing it later doesn't revoke that; the same holds for the placeholder font that sessions 1–3 drew in code, now removed), `scripts/**`, `tests/**`, `src/style.css`, `index.html`, build and tooling files (`package.json`, `package-lock.json`, `tsconfig.json`, `vite.config.ts`, `.github/**`, dotfiles), and this `README.md` |
+| **CC BY-NC-SA 4.0** ([`LICENSE-CONTENT`](LICENSE-CONTENT)) — content | `src/data/**` (maps now; dialogue, story text and other game data later), `public/assets/**` (art, audio) except `public/assets/fonts/**`, and `docs/**` (design and narrative documents) |
+| **BSD-2-Clause** (Spleen's own [`LICENSE`](third_party/spleen-2.2.0/LICENSE)) — third-party font | `third_party/spleen-2.2.0/**` (Spleen 6x12 by Frederic Cambus, unmodified) and `public/assets/fonts/spleen-6x12.png` (a pixel-exact bitmap generated from it). Not ours, so neither MIT nor CC applies. |
 
-Content paths take precedence over code paths. Anything not listed under content is code and falls under MIT, except the licence and notice files themselves (`LICENSE`, `LICENSE-CONTENT`, `public/THIRD-PARTY-NOTICES.txt`), which keep their own terms. `package.json` declares `"license": "MIT"` for the code.
+Third-party paths take precedence over content paths, and content paths over code paths. Anything not listed under content or third-party is code and falls under MIT, except the licence and notice files themselves (`LICENSE`, `LICENSE-CONTENT`, `public/THIRD-PARTY-NOTICES.txt`), which keep their own terms. `package.json` declares `"license": "MIT"` for the code.
 
 The built game in `dist/` bundles both kinds of material, so redistributing the build means following both licences, including CC BY-NC-SA's non-commercial and share-alike terms for the content.
 
-Third-party: the build bundles [Phaser](https://phaser.io) (MIT), along with code Phaser itself includes: eventemitter3, Matter.js, poly-decomp (MIT), Earcut (ISC), Simplify.js (BSD-2-Clause), psrdnoise (MIT) and a few attributed snippets. Their notices ship with the game in [`public/THIRD-PARTY-NOTICES.txt`](public/THIRD-PARTY-NOTICES.txt), and a banner at the top of the built JS points to it.
+Third-party: the build bundles [Phaser](https://phaser.io) (MIT), along with code Phaser itself includes: eventemitter3, Matter.js, poly-decomp (MIT), Earcut (ISC), Simplify.js (BSD-2-Clause), psrdnoise (MIT) and a few attributed snippets. The game's font is [Spleen](https://github.com/fcambus/spleen) 6x12, release 2.2.0, © 2018-2026 Frederic Cambus, BSD-2-Clause; it's bundled with the game as a PNG atlas, never loaded from elsewhere. All their notices ship with the game in [`public/THIRD-PARTY-NOTICES.txt`](public/THIRD-PARTY-NOTICES.txt), and a banner at the top of the built JS names Spleen and points to that file.
 
-When Phaser or other dependencies change, update that file. Check the installed `LICENSE` files, and look for vendored code inside Phaser's build with:
+When Phaser, the font or other dependencies change, update that file. Check the installed `LICENSE` files, and look for vendored code inside Phaser's build with:
 
 ```bash
 grep -nE "ISC License|Redistribution and use|Copyright \(c\)|@license" node_modules/phaser/dist/phaser.esm.js | grep -v "Phaser Studio"
@@ -136,8 +144,12 @@ grep -nE "ISC License|Redistribution and use|Copyright \(c\)|@license" node_modu
 
 ## Editing maps
 
-Maps are Tiled JSON with embedded tilesets. The layer and property conventions are in [`docs/DESIGN.md` §2.4](docs/DESIGN.md#24-maps-tiled).
+Maps are Tiled JSON with embedded tilesets, listed in `src/data/maps/index.json`. The layer and property conventions are in [`docs/DESIGN.md` §2.4](docs/DESIGN.md#24-maps-tiled); warps and spawn points are in [§2.12](docs/DESIGN.md#212-maps-warps-and-zones-session-4).
 
-The map's tileset points at `public/assets/tilesets/tiles.png`, a pixel-exact export of the placeholder tileset that the game draws at runtime (a regression check fails if they drift apart). The game itself doesn't load the PNG yet; it will once real tiles replace the placeholder. The PNG is under `public/assets/**`, so it's CC BY-NC-SA by path, but it's also an export of MIT placeholder art, so the MIT grant for that art still applies.
+The maps' tilesets point at `public/assets/tilesets/tiles.png` and `overhead.png`, pixel-exact exports of the placeholder tilesets that the game draws at runtime (regression checks H6 and O4 fail if they drift). The game itself doesn't load the PNGs yet; it will once real tiles replace the placeholders. They're under `public/assets/**`, so they're CC BY-NC-SA by path, but they're also exports of MIT placeholder art, so the MIT grant for that art still applies.
+
+## Changing the font
+
+The font atlas is generated, not drawn: `node scripts/build-font-atlas.mjs` rebuilds `public/assets/fonts/spleen-6x12.png` from the BDF. To add characters (e.g. curly quotes), add their code point range to the script and to `FONT_RANGES` in `src/systems/font.ts`; regression check N2 fails if the two disagree.
 
 The map opens and saves cleanly in Tiled 1.12 (round trip verified in session 3). The workflow, NPC layer and flip rules are in [`docs/DESIGN.md` §2.4](docs/DESIGN.md#24-maps-tiled). Keep the tileset **embedded**; Phaser ignores external tilesets.

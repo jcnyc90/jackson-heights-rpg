@@ -1,0 +1,8 @@
+{
+  "start": { "map": "test-map", "spawn": "start" },
+  "maps": [
+    { "id": "test-map", "file": "test-map.json", "name": "map.test-map.name" },
+    { "id": "roosevelt-ave", "file": "roosevelt-ave.json", "name": "map.roosevelt-ave.name" },
+    { "id": "diversity-plaza-74th", "file": "diversity-plaza-74th.json", "name": "map.diversity-plaza-74th.name" }
+  ]
+}

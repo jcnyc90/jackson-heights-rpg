@@ -36,7 +36,8 @@ export default defineConfig({
         postBanner:
           '/*! Jackson Heights RPG (c) 2026 jcnyc90: code MIT, content CC BY-NC-SA 4.0 ' +
           '(https://github.com/jcnyc90/jackson-heights-rpg). Bundles Phaser and third-party code ' +
-          'under MIT, ISC and BSD licences; notices: ../THIRD-PARTY-NOTICES.txt */',
+          'under MIT, ISC and BSD licences, and the Spleen font (c) 2018-2026 Frederic Cambus, ' +
+          'BSD-2-Clause; notices: ../THIRD-PARTY-NOTICES.txt */',
       },
     },
   },

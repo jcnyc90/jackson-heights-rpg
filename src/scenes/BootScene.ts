@@ -1,18 +1,20 @@
 import Phaser from 'phaser';
-import testMap from '../data/maps/test-map.json';
-import { DIRECTIONS, MAPS, PLAYER_FRAME, TEXTURES } from '../config';
+import { DIRECTIONS, FONT, PLAYER_FRAME, TEXTURES } from '../config';
 import { generatePlaceholderTextures } from '../systems/placeholderArt';
-import { generatePlaceholderFont } from '../systems/placeholderFont';
+import { registerFont } from '../systems/font';
+import { MAP_LIST, validateLinks } from '../systems/maps';
 
-/** Loads data, generates placeholder textures and font, registers animations, then starts the map. */
+/** Loads data and the font, generates placeholder textures, registers animations, then starts the map. */
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('Boot');
   }
 
   preload(): void {
-    // The map is bundled with the code; the loader accepts parsed Tiled JSON directly.
-    this.load.tilemapTiledJSON(MAPS.test, testMap);
+    // Maps are bundled with the code; the loader accepts parsed Tiled JSON directly.
+    for (const map of MAP_LIST) this.load.tilemapTiledJSON(map.id, map.data);
+    // Spleen 6x12 atlas (bundled with the game, never hotlinked; see src/systems/font.ts).
+    this.load.image(FONT.key, FONT.atlas);
     // Real art goes here, e.g.:
     // this.load.spritesheet(TEXTURES.player, 'assets/sprites/player.png',
     //   { frameWidth: PLAYER_FRAME.width, frameHeight: PLAYER_FRAME.height });
@@ -20,7 +22,7 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     generatePlaceholderTextures(this);
-    generatePlaceholderFont(this);
+    registerFont(this);
 
     // Walk cycle per direction: step A, stand, step B, stand (frame = row * columns + col).
     DIRECTIONS.forEach((dir, row) => {
@@ -33,6 +35,8 @@ export class BootScene extends Phaser.Scene {
       });
     });
 
-    this.scene.start('TestMap');
+    // Dev builds check every warp link up front, so a typo fails at boot, not mid-game.
+    if (import.meta.env.DEV) validateLinks();
+    this.scene.start('Map');
   }
 }

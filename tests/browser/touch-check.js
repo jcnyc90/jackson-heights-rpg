@@ -1,7 +1,8 @@
 // Touch-control check for mobile emulation (run with a touch viewport, e.g. 375x812 or 667x375).
 // Session 3 adds the Action button driving dialogue (open, skip, turn page, close, D-pad locked).
+// Session 4 adds a warp taken with the D-pad held (and an Action tap during the fade).
 // Deterministic frame stepping like regression-suite.js. Returns a results object.
-const g = window.game; const s = g.scene.getScene('TestMap');
+const g = window.game; const s = g.scene.getScene('Map');
 const FRAME = 1000 / 60; let T = performance.now();
 g.loop.sleep();
 const run = (ms) => { const n = Math.round(ms / FRAME); for (let i = 0; i < n; i++) { T += FRAME; g.step(T, FRAME); } };
@@ -43,5 +44,21 @@ try {
   R.dpadLockedWhileOpen = [s.player.x - lx, s.player.y - ly, s.controls.direction()]; pe(window, 'pointerup', cx + d.width * 0.4, cy, 13); run(50);
   tap(14); tap(15); R.dialogueClosed = !s.talking && !g.scene.isActive('Dialogue');
   run(200); R.notReopened = !s.talking;
-} catch (e) { R.ERROR = String(e && e.stack || e); } finally { s.facing = 'down'; s.player.body.reset(232, 268); run(50); g.loop.wake(); }
+  // Warp with the D-pad held: test-map street exit -> Roosevelt Avenue. Tap Action mid-fade.
+  s.player.body.reset(420, 96); run(50);
+  pe(dpad, 'pointerdown', cx + d.width * 0.4, cy, 20); let n = 0, tapped = false, fadeDirs = new Set();
+  while (!(s.info.id === 'roosevelt-ave' && !s.warping) && n++ < 240) {
+    run(1000 / 60);
+    if (s.warping) fadeDirs.add(s.controls.direction());
+    if (s.warping && !tapped) { tapped = true; pe(act, 'pointerdown', ax, ay, 21); pe(act, 'pointerup', ax, ay, 21); }
+  }
+  const arrive = [s.player.x, s.player.y]; run(500);
+  R.warpWithDpadHeld = { arrived: [s.info.id, ...arrive, s.facing], frames: n, dirsDuringFade: [...fadeDirs], movedWhileStillHeld: [s.player.x - arrive[0], s.player.y - arrive[1]], dpadStillHeld: dpad.dataset.dir ?? null, emoteFromFadeTap: s.emote.visible };
+  pe(window, 'pointerup', cx + d.width * 0.4, cy, 20); run(50);
+  pe(dpad, 'pointerdown', cx + d.width * 0.4, cy, 22); run(200); pe(window, 'pointerup', cx + d.width * 0.4, cy, 22); run(50);
+  R.warpWithDpadHeld.freshPressMovedPx = s.player.x - arrive[0];
+} catch (e) { R.ERROR = String(e && e.stack || e); } finally {
+  if (s.info.id !== 'test-map' || s.warping) { s.scene.restart({}); run(100); }
+  s.facing = 'down'; s.player.body.reset(232, 268); run(50); g.loop.wake();
+}
 R;

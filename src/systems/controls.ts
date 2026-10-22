@@ -12,10 +12,22 @@ const DIRECTION_KEYS: Record<Direction, number[]> = {
 };
 const ACTION_KEYS = [KeyCodes.SPACE, KeyCodes.ENTER, KeyCodes.Z];
 
-/** Merges keyboard and on-screen touch input into one 4-way direction + action. */
+/**
+ * Merges keyboard and on-screen touch input into one 4-way direction + action.
+ *
+ * Can be locked (e.g. during a map fade). While locked it reports nothing, and every press
+ * that exists during the lock goes stale: a stale key or D-pad press is ignored until it is
+ * released, so a hold never carries over into the next map. Auto-repeat keydowns are stale
+ * too: Phaser recreates its Key objects when a scene restarts, and a held key's next repeat
+ * would otherwise look like a fresh press.
+ */
 export class Controls {
   private readonly directionKeys: [Direction, Phaser.Input.Keyboard.Key][] = [];
   private readonly actionKeys: Phaser.Input.Keyboard.Key[];
+  private readonly staleKeys = new Set<Phaser.Input.Keyboard.Key>();
+  /** D-pad presses up to this count are stale (see touchState.dpadPresses). */
+  private staleDpadPresses = -1;
+  private locked = false;
 
   constructor(scene: Phaser.Scene) {
     const keyboard = scene.input.keyboard;
@@ -25,6 +37,13 @@ export class Controls {
       for (const code of codes) this.directionKeys.push([dir, keyboard.addKey(code)]);
     }
     this.actionKeys = ACTION_KEYS.map((code) => keyboard.addKey(code));
+    for (const key of this.allKeys()) {
+      key.on(Phaser.Input.Keyboard.Events.DOWN, (_key: unknown, event: KeyboardEvent) => {
+        if (this.locked || event.repeat) this.staleKeys.add(key);
+        else this.staleKeys.delete(key);
+      });
+      key.on(Phaser.Input.Keyboard.Events.UP, () => this.staleKeys.delete(key));
+    }
 
     // Release held keys when the window loses focus. Phaser's own blur listener isn't enough:
     // KeyboardPlugin.shutdown() (v3 and v4) removes every scene's listener because it calls
@@ -41,11 +60,15 @@ export class Controls {
    * Cmd+A / Cmd+D would otherwise leave the player walking forever.
    */
   direction(): Direction | null {
-    if (touchState.direction) return touchState.direction;
+    if (this.locked) {
+      this.staleDpadPresses = touchState.dpadPresses;
+      return null;
+    }
+    if (touchState.direction && touchState.dpadPresses > this.staleDpadPresses) return touchState.direction;
     let latest: Direction | null = null;
     let latestTime = -Infinity;
     for (const [dir, key] of this.directionKeys) {
-      if (key.isDown && !key.metaKey && key.timeDown > latestTime) {
+      if (key.isDown && !key.metaKey && !this.staleKeys.has(key) && key.timeDown > latestTime) {
         latest = dir;
         latestTime = key.timeDown;
       }
@@ -53,10 +76,28 @@ export class Controls {
     return latest;
   }
 
-  /** True once per press of any action input. */
+  /** True once per press of any action input. Presses made while locked are swallowed. */
   actionPressed(): boolean {
     let pressed = touchState.takeAction();
-    for (const key of this.actionKeys) if (Phaser.Input.Keyboard.JustDown(key) && !key.metaKey) pressed = true;
-    return pressed;
+    for (const key of this.actionKeys) {
+      if (Phaser.Input.Keyboard.JustDown(key) && !key.metaKey && !this.staleKeys.has(key)) pressed = true;
+    }
+    return pressed && !this.locked;
+  }
+
+  /** Locking makes every key and D-pad press held right now stale (ignored until released). */
+  setLocked(locked: boolean): void {
+    this.locked = locked;
+    if (!locked) return;
+    for (const key of this.allKeys()) if (key.isDown) this.staleKeys.add(key);
+    this.staleDpadPresses = touchState.dpadPresses;
+  }
+
+  isLocked(): boolean {
+    return this.locked;
+  }
+
+  private allKeys(): Phaser.Input.Keyboard.Key[] {
+    return [...this.directionKeys.map(([, key]) => key), ...this.actionKeys];
   }
 }

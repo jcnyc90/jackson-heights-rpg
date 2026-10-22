@@ -59,11 +59,18 @@ function pixelMap(ctx: Ctx, ox: number, oy: number, rows: string[], palette: Rec
 //   0 grass   1 sidewalk   2 road    3 road marking
 //   4 wall    5 tree       6 planter 7 water          (4-7 collide; set in the map JSON)
 // Adding a tile? Also update the map JSON tileset's tilecount/imageheight.
+//
+// Overhead tileset (texture `overhead`, Tiled tileset "overhead"): tiles that draw over
+// sprites, used only in a map's "above" layer and never colliding.
+//   0 tree canopy (top half of TREE)
 // ---------------------------------------------------------------------------
 
 const TILESET_COLUMNS = 4;
 
+// A tree is two tiles tall: the top half is the canopy, drawn in the "above" layer over
+// sprites (overhead tile 0); the bottom half is tile 5 in "obstacles" (lower crown + trunk).
 const TREE = [
+  '................',
   '................',
   '.....oooooo.....',
   '...ooGGGGGGoo...',
@@ -73,14 +80,31 @@ const TREE = [
   'oGGGGGgGGGGGGGGo',
   'oGgGGGGGGGGGgGGo',
   'oGGGGGGGGgGGGGgo',
-  '.oGGgGGGGGGGGGo.',
-  '.ogGGGGGgGGGGgo.',
-  '..oogggggggggo..',
-  '....oooTTooo....',
+  'oGGGgGGGGGGGGGGo',
+  'oGGGGGGGgGGGgGGo',
+  'oGgGGGGGGGGGGGGo',
+  'oGGGGGgGGGGgGGGo',
+  'oGGGGGGGGGGGGGgo',
+  'oGgGGGGgGGGGGGGo',
+  // ---- tile boundary: canopy above, trunk tile below
+  'oGGGGGGGGGgGGGGo',
+  'oGGgGGGGGGGGGgGo',
+  '.oGGGGGgGGGGGGo.',
+  '.ogGGGGGGGGgGgo.',
+  '..oggGGGGGGggo..',
+  '...ooggggggoo...',
+  '.....ooTToo.....',
   '......oTTo......',
   '......oTTo......',
+  '......oTTo......',
+  '......oTTo......',
+  '......oTTo......',
+  '......oTTo......',
+  '......oTTo......',
+  '.....oTTTTo.....',
   '.....oooooo.....',
 ];
+const TREE_COLORS = { o: C.outline, G: C.leaf, g: C.leafDark, T: C.trunk };
 
 const PLANTER = [
   '................',
@@ -148,8 +172,8 @@ const TILE_PAINTERS: ((ctx: Ctx, x: number, y: number) => void)[] = [
     rect(ctx, C.glass, x + 5, y + 5, 6, 5);
     rect(ctx, C.white, x + 5, y + 5, 2, 1);
   },
-  // 5 tree
-  (ctx, x, y) => pixelMap(ctx, x, y, TREE, { o: C.outline, G: C.leaf, g: C.leafDark, T: C.trunk }),
+  // 5 tree (trunk and lower crown; the canopy is overhead tile 0)
+  (ctx, x, y) => pixelMap(ctx, x, y, TREE.slice(TILE_SIZE), TREE_COLORS),
   // 6 planter
   (ctx, x, y) =>
     pixelMap(ctx, x, y, PLANTER, {
@@ -167,6 +191,11 @@ const TILE_PAINTERS: ((ctx: Ctx, x: number, y: number) => void)[] = [
     rect(ctx, C.waterLight, x + 9, y + 8, 5, 1);
     rect(ctx, C.waterLight, x + 4, y + 12, 4, 1);
   },
+];
+
+const OVERHEAD_PAINTERS: ((ctx: Ctx, x: number, y: number) => void)[] = [
+  // 0 tree canopy
+  (ctx, x, y) => pixelMap(ctx, x, y, TREE.slice(0, TILE_SIZE), TREE_COLORS),
 ];
 
 function paintRoad(ctx: Ctx, x: number, y: number): void {
@@ -289,6 +318,10 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
     TILE_PAINTERS.forEach((paint, i) =>
       paint(ctx, (i % TILESET_COLUMNS) * TILE_SIZE, Math.floor(i / TILESET_COLUMNS) * TILE_SIZE),
     );
+  });
+
+  make(TEXTURES.overhead, TILE_SIZE * OVERHEAD_PAINTERS.length, TILE_SIZE, (ctx) => {
+    OVERHEAD_PAINTERS.forEach((paint, i) => paint(ctx, i * TILE_SIZE, 0));
   });
 
   const { width: fw, height: fh, columns } = PLAYER_FRAME;

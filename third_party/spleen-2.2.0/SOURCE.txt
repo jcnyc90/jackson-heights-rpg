@@ -1,0 +1,10 @@
+Spleen 2.2.0 by Frederic Cambus, BSD-2-Clause (see LICENSE in this directory).
+
+Source:  https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz
+         sha256 ec42925c6b56d2138c862b2f97147c872e472f674bf03423417d827a08d69a89
+Files taken unmodified from that archive:
+  spleen-6x12.bdf  sha256 fc0743d164690f99b7e2e1b9d503180e4c719a9831ae03fd8f6da18c857dee27
+  LICENSE          sha256 f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af
+
+The game doesn't load the BDF. scripts/build-font-atlas.mjs converts it to
+public/assets/fonts/spleen-6x12.png (pixel-exact; regression check N2 compares the two).

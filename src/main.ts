@@ -3,7 +3,7 @@ import './style.css';
 import { BG_COLOR, GAME_HEIGHT, GAME_WIDTH } from './config';
 import { BootScene } from './scenes/BootScene';
 import { DialogueScene } from './scenes/DialogueScene';
-import { TestMapScene } from './scenes/TestMapScene';
+import { MapScene } from './scenes/MapScene';
 import { applyDocumentStrings } from './systems/strings';
 import { initTouchControls } from './systems/touchControls';
 
@@ -31,7 +31,7 @@ const game = new Phaser.Game({
   },
   audio: { noAudio: true }, // no audio yet; avoids creating an AudioContext
   // Later scenes render on top: the text window draws over the map.
-  scene: [BootScene, TestMapScene, DialogueScene],
+  scene: [BootScene, MapScene, DialogueScene],
 });
 
 // Dev only: expose the game for poking at it from the browser console.

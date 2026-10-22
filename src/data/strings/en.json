@@ -5,10 +5,19 @@
   "npc.neighbor-a.name": "Neighbor A",
   "npc.neighbor-b.name": "Neighbor B",
   "npc.neighbor-c.name": "Neighbor C",
+  "npc.neighbor-d.name": "Neighbor D",
+  "npc.neighbor-e.name": "Neighbor E",
+
+  "map.test-map.name": "Test Map",
+  "map.roosevelt-ave.name": "Roosevelt Avenue",
+  "map.diversity-plaza-74th.name": "Diversity Plaza",
 
   "dialogue.neighbor-a.hello.1": "Hi there! I'm {name}.",
   "dialogue.neighbor-a.hello.2": "I'm only a placeholder for now. Real neighbors move in later.",
   "dialogue.neighbor-b.hello.1": "Hello, I'm {name}. This is a longer test line, so the text window has to wrap it across several lines and then carry the rest over to a second page.",
   "dialogue.neighbor-b.hello.2": "Press Action to finish a page early, then again to turn the page.",
-  "dialogue.neighbor-c.hello.1": "{name} here. Nice weather today."
+  "dialogue.neighbor-c.hello.1": "{name} here. Nice weather today.",
+  "dialogue.neighbor-c.font-test": "Font test: ¿Qué tal? ¡Sí! Mañana, pingüino, árbol, índice, ópera, último.",
+  "dialogue.neighbor-d.hello.1": "Hi, I'm {name}. This street is a rough placeholder for now.",
+  "dialogue.neighbor-e.hello.1": "Hello, I'm {name}. This plaza is a rough placeholder too."
 }

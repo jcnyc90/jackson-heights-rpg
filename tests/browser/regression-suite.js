@@ -1,10 +1,11 @@
 // Desktop behaviour regression suite. A-G: sessions 1-2 (45 checks). H-M: session 3
 // (strings, font, tileset export, dialogue, NPC targeting/collision, depth sorting).
+// N-P: session 4 (Spleen font, "above" tile layer, map registry, warps, fades, zones).
 // Deterministic: pauses Phaser's rAF loop and advances frames manually at exactly 60 fps via
 // game.step(time, delta), so results don't depend on the browser pane being visible.
 // Run on the dev server (needs the DEV-only window.game hook); see tests/browser/README.md.
 // Top-level await: evaluate as an async function body. Returns a results object.
-const g = window.game; const s = g.scene.getScene('TestMap');
+const g = window.game; const s = g.scene.getScene('Map');
 const FRAME = 1000 / 60; let T = performance.now(); let frames = 0;
 g.loop.sleep();
 const run = (ms) => { const n = Math.round(ms / FRAME); for (let i = 0; i < n; i++) { T += FRAME; g.step(T, FRAME); frames++; } };
@@ -101,7 +102,7 @@ try {
   g.scene.remove('BlurProbe'); run(50);
 
   // ---- Session 3 ----
-  const FONT_MOD = await import('/src/systems/placeholderFont.ts');
+  const FONT_MOD = await import('/src/systems/font.ts');
   const STR_MOD = await import('/src/systems/strings.ts');
   const LAYOUT = await import('/src/systems/textLayout.ts');
   const EN = (await import('/src/data/strings/en.json')).default;
@@ -211,12 +212,183 @@ try {
   at(168, 266); check('M2 player below NPC is drawn in front', [order(), s.player.depth > A.sprite.depth], ['player-in-front', true]);
   ev('keydown', 'ArrowUp'); run(400); ev('keyup', 'ArrowUp'); run(50);
   check('M3 depth follows the player while walking (stopped at NPC, in front)', [s.player.y, order()], [264, 'player-in-front']);
-  const layers = s.children.list.filter((o) => o.type === 'TilemapLayer');
-  check('M4 tile layers under all sprites, emote over all', [layers.every((l) => l.depth < 0), s.emote.depth > Math.max(...s.npcs.map((n) => n.sprite.depth), 320)], [true, true]);
+  // Session 4: the "above" layer is meant to draw over sprites, so M4 covers the other layers; O1 pins "above".
+  const layers = s.children.list.filter((o) => o.type === 'TilemapLayer' && o.layer.name !== 'above');
+  check('M4 tile layers (except "above", see O1) under all sprites, emote over all', [layers.every((l) => l.depth < 0), s.emote.depth > Math.max(...s.npcs.map((n) => n.sprite.depth), 320)], [true, true]);
+
+  // ---- Session 4 ----
+  const MAPS_MOD = await import('/src/systems/maps.ts');
+  const snap = () => { const cv = document.createElement('canvas'); cv.width = 256; cv.height = 224; const c2 = cv.getContext('2d'); c2.drawImage(g.canvas, 0, 0); return c2.getImageData(0, 0, 256, 224).data; }; // call right after a step
+  const rgbAt = (px, x, y) => { const p = (y * 256 + x) * 4; return (px[p] << 16) | (px[p + 1] << 8) | px[p + 2]; };
+  const layerOf = (name) => s.children.list.find((o) => o.type === 'TilemapLayer' && o.layer.name === name);
+
+  // N. Font: Spleen 6x12, pixel-exact from the BDF in third_party/
+  const bdfText = await (await fetch('/third_party/spleen-2.2.0/spleen-6x12.bdf')).text();
+  const BDF = new Map(); for (const m of bdfText.matchAll(/ENCODING (\d+)[\s\S]*?BBX (\d+) (\d+) (-?\d+) (-?\d+)\s+BITMAP\s+([\s\S]*?)ENDCHAR/g)) BDF.set(+m[1], m[6].trim().split(/\s+/).map((h) => parseInt(h, 16)));
+  const bit = (code, x, y) => ((BDF.get(code)[y] >> (7 - x)) & 1) === 1; // every glyph is BBX 6 12 0 -3 (N2)
+  const fontData = g.cache.bitmapFont.get('font').data;
+  const enChars = [...new Set([...Object.values(EN).join('')])].filter((ch) => ch !== '\n');
+  check('N1 every character used in en.json has a glyph in the loaded font', enChars.filter((ch) => !fontData.chars[ch.charCodeAt(0)]), []);
+  const fontImg = g.textures.get('font').getSourceImage(); const fontPx = pixels(fontImg); const FCH = FONT_MOD.FONT_CHARS; const atlasBad = [];
+  for (let i = 0; i < FCH.length; i++) {
+    const code = FCH.charCodeAt(i), cx = (i % 16) * 6, cy = Math.floor(i / 16) * 12;
+    outer: for (let y = 0; y < 12; y++) for (let x = 0; x < 6; x++) {
+      const p = ((cy + y) * fontImg.width + cx + x) * 4;
+      const ok = bit(code, x, y) ? fontPx[p] === 0xff && fontPx[p + 1] === 0xfa && fontPx[p + 2] === 0xf0 && fontPx[p + 3] === 255 : fontPx[p + 3] === 0;
+      if (!ok) { atlasBad.push(FCH[i]); break outer; }
+    }
+  }
+  check('N2 font atlas == Spleen 6x12 BDF, pixel-exact (ASCII + Latin-1, 191 glyphs)', [fontImg.width, fontImg.height, FCH.length, [...bdfText.matchAll(/BBX (.*)/g)].every((m) => m[1] === '6 12 0 -3'), atlasBad], [96, 144, 191, true, []]);
+  s.scene.launch('Dialogue', { entries: ['x'.repeat(200)] }); run(50); const longPages = D().pages; s.scene.stop('Dialogue'); run(50);
+  check('N3 text window layout unchanged: 36 chars x 3 lines', [longPages.map((pg) => pg.split('\n').map((l) => l.length))], [[[36, 36, 36], [36, 36, 20]]]);
+  // Neighbor C's second page is the accented font test; compare every rendered cell with the BDF.
+  place(56, 288, 'down'); press(); press(); press(); press(); run(FRAME);
+  const accPage = D().pages[D().page]; const accPx = snap(); const tx0 = D().text.x, ty0 = D().text.y; const glyphBad = [];
+  accPage.split('\n').forEach((line, row) => [...line].forEach((ch, col) => {
+    for (let y = 0; y < 12; y++) for (let x = 0; x < 6; x++) if (rgbAt(accPx, tx0 + col * 6 + x, ty0 + row * 12 + y) !== (bit(ch.charCodeAt(0), x, y) ? 0xfffaf0 : 0x2a1f3d)) { glyphBad.push(ch); return; }
+  }));
+  check('N4 accented test string (é ñ á í ó ú ü ¿ ¡) renders pixel-exact in the window', [D().page, D().pageComplete(), [...'éñáíóúü¿¡'].every((ch) => accPage.includes(ch)), accPage.split('\n').length, glyphBad], [1, true, true, 3, []]);
+  closeDialogue();
+  check('N5 placeholder font code is gone', [await import('/src/systems/placeholderFont.ts').then(() => 'still there', () => 'gone'), 'generatePlaceholderFont' in FONT_MOD], ['gone', false]);
+
+  // O. "above" tile layer (tree canopies draw over sprites; collision stays on "obstacles")
+  const above = layerOf('above');
+  const treeCells = obstacles.layer.data.flat().filter((tile) => tile.index === 6).map((tile) => `${tile.x},${tile.y - 1}`);
+  const canopyCells = above.layer.data.flat().filter((tile) => tile.index !== -1).map((tile) => `${tile.x},${tile.y}`);
+  check('O1 "above": one canopy north of each tree, no collision, over every sprite, under the emote',
+    [treeCells.length, JSON.stringify(canopyCells) === JSON.stringify(treeCells), above.layer.data.flat().some((tile) => tile.collides), above.depth > 320 && above.depth > Math.max(s.player.depth, ...s.npcs.map((n) => n.sprite.depth)), above.depth < s.emote.depth],
+    [9, true, false, true, true]);
+  // Player pixels (drawn when "above" is hidden, gone when the player is hidden too) that change
+  // when "above" is shown = player pixels the canopy covers. Returns [player pixels, covered].
+  const coveredPixels = () => {
+    run(FRAME); const all = snap(); above.setVisible(false); run(FRAME); const noAbove = snap();
+    s.player.setVisible(false); run(FRAME); const neither = snap(); s.player.setVisible(true); above.setVisible(true); run(FRAME);
+    const cam = s.cameras.main; const x0 = Math.round(s.player.x - 8 - cam.scrollX), y0 = Math.round(s.player.y - 24 - cam.scrollY); let drawn = 0, covered = 0;
+    for (let y = Math.max(0, y0); y < Math.min(224, y0 + 24); y++) for (let x = Math.max(0, x0); x < Math.min(256, x0 + 16); x++) {
+      if (rgbAt(noAbove, x, y) === rgbAt(neither, x, y)) continue;
+      drawn++; if (rgbAt(all, x, y) !== rgbAt(noAbove, x, y)) covered++;
+    }
+    return [drawn, covered];
+  };
+  // Behind: walk west along the north sidewalk to just north of the first street tree's trunk.
+  at(88, 44); const behindEnd = hold('ArrowLeft', 32 * FRAME); const behind = coveredPixels();
+  check('O2 walking behind a tree: the canopy covers the player', [behindEnd, behind[0] > 100, behind[1] > 60], [[56, 44], true, true]); R['O2 info: player px drawn / covered'] = behind.join(' / ');
+  // In front: walk north up the street until the same trunk stops the player.
+  at(56, 100); const frontEnd = hold('ArrowUp', 600); const front = coveredPixels(); run(FRAME); const frontPx = snap();
+  R['O3 info: player px drawn / covered'] = front.join(' / ');
+  check('O3 walking in front of a tree: not covered, drawn over the trunk', [frontEnd, front[0] > 100, front[1], rgbAt(frontPx, 56 - s.cameras.main.scrollX, 60 - s.cameras.main.scrollY) !== 0xb07c62], [[56, 72], true, 0, true]);
+
+  const overheadPng = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = '/assets/tilesets/overhead.png?' + Date.now(); });
+  check('O4 public/assets/tilesets/overhead.png == generated overhead tileset (pixel-exact)', JSON.stringify(pixels(overheadPng)) === JSON.stringify(pixels(g.textures.get('overhead').getSourceImage())), true);
+
+  // P. Map registry, warps, fades, zones
+  const M = MAPS_MOD; const mapById = (id) => M.MAP_LIST.find((m) => m.id === id);
+  const throwsMsg = (f) => { try { f(); return null; } catch (e) { return e.message; } };
+  check('P1 registry: 3 maps, files and display names resolve, every warp link valid',
+    [M.MAP_LIST.map((m) => m.id), M.MAP_LIST.map((m) => STR_MOD.t(m.nameId)), throwsMsg(M.validateLinks), [M.START.map.id, M.START.spawn.spawnId]],
+    [['test-map', 'roosevelt-ave', 'diversity-plaza-74th'], ['Test Map', 'Roosevelt Avenue', 'Diversity Plaza'], null, ['test-map', 'start']]);
+  const gotoMap = (mapId) => { s.scene.restart({ mapId, spawnId: mapById(mapId).spawns[0].spawnId }); run(100); };
+  // Where to stand and which way to walk to step onto each warp (a new warp needs an entry; P2 checks coverage).
+  const APPROACH = { 'test-map/5': [420, 96, 'ArrowRight'], 'roosevelt-ave/1': [40, 112, 'ArrowLeft'], 'roosevelt-ave/3': [240, 48, 'ArrowUp'], 'diversity-plaza-74th/1': [240, 300, 'ArrowDown'] };
+  const allWarps = M.MAP_LIST.flatMap((m) => m.warps.map((w) => ({ from: m.id, warp: w })));
+  // Walks onto a warp holding the key and steps until the next map has faded in. onFrame(i, phase) runs after each frame.
+  const walkWarp = (from, warp, { onFrame, keepHeld = false, input = 'key' } = {}) => {
+    gotoMap(from); const [x, y, key] = APPROACH[`${from}/${warp.objectId}`]; at(x, y);
+    const dpadDir = { ArrowRight: [100, 0], ArrowLeft: [-100, 0], ArrowUp: [0, -100], ArrowDown: [0, 100] }[key];
+    if (input === 'dpad') pe(dpadEl, 'pointerdown', ...dpadDir, 41); else ev('keydown', key);
+    const trace = [];
+    for (let i = 0; i < 240; i++) {
+      run(FRAME);
+      const phase = s.info.id === from ? (s.warping ? 'out' : 'walk') : (s.warping ? 'in' : 'done');
+      trace.push({ phase, x: s.player.x, y: s.player.y, alpha: s.cameras.main.fadeEffect.alpha, emote: s.emote.visible, talking: s.talking });
+      onFrame?.(i, phase, trace);
+      if (phase === 'done') break;
+    }
+    if (!keepHeld) { if (input === 'dpad') pe(window, 'pointerup', ...dpadDir, 41); else ev('keyup', key); run(50); }
+    return trace;
+  };
+  const dpadEl = document.getElementById('dpad');
+  const pe = (target, type, x, y, id) => target.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  const landed = () => [s.info.id, s.player.x, s.player.y, s.facing];
+  const expectLanding = (warp) => { const d = M.resolveDestination(warp.targetMap, warp.targetSpawn); return [d.map.id, d.spawn.x, d.spawn.y, d.spawn.facing]; };
+
+  const pairResults = {}, pairExpected = {}; let firstTrace = null;
+  for (const { from, warp } of allWarps) {
+    const tr = walkWarp(from, warp); firstTrace ??= tr;
+    pairResults[`${from}/${warp.objectId}`] = landed(); pairExpected[`${from}/${warp.objectId}`] = expectLanding(warp);
+  }
+  const pairedBack = allWarps.every(({ from, warp }) => mapById(warp.targetMap).warps.some((w) => w.targetMap === from));
+  check('P2 every warp, both directions: lands on the target spawn, facing its way', [Object.keys(APPROACH).sort(), pairedBack, pairResults], [allWarps.map(({ from, warp }) => `${from}/${warp.objectId}`).sort(), true, pairExpected]);
+  const count = (tr, ph) => tr.filter((f) => f.phase === ph).length;
+  const outAlphas = firstTrace.filter((f) => f.phase === 'out').map((f) => f.alpha);
+  check('P3 fade: ~250 ms out (to black) and ~250 ms in, player still throughout',
+    [Math.abs(count(firstTrace, 'out') - 15) <= 2, Math.abs(count(firstTrace, 'in') - 15) <= 2, outAlphas.every((a, i) => i === 0 || a >= outAlphas[i - 1]), Math.max(...outAlphas) > 0.9, firstTrace.at(-1).alpha,
+      new Set(firstTrace.filter((f) => f.phase === 'out').map((f) => `${f.x},${f.y}`)).size, new Set(firstTrace.filter((f) => f.phase === 'in').map((f) => `${f.x},${f.y}`)).size],
+    [true, true, true, true, 0, 1, 1]);
+  // Darkness at the switch: centre pixel (R+G+B) of the last old-map frame and the first new-map frame.
+  const lum = () => { const c = rgbAt(snap(), 128, 112); return ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255); };
+  let lastOut = null, firstIn = null; walkWarp('test-map', mapById('test-map').warps[0], { onFrame: (i, ph) => { if (ph === 'out') lastOut = lum(); if (ph === 'in' && firstIn === null) firstIn = lum(); } });
+  check('P3b screen is black when the maps swap (last old frame black, first new frame near-black)', [lastOut, firstIn !== null && firstIn < 60], [0, true]);
+  check('P3c name card shows the map name after arriving, then goes', [s.children.list.some((o) => o.type === 'BitmapText' && o.text === 'Roosevelt Avenue'), (run(1600), s.children.list.some((o) => o.type === 'BitmapText' && o.text === 'Roosevelt Avenue'))], [true, false]);
+
+  // P4. Input lock: Action and a new direction during the fade-out and the fade-in do nothing, now or later.
+  let lockLog = { dirs: [], emote: false, talking: false };
+  walkWarp('test-map', mapById('test-map').warps[0], { onFrame: (i, ph) => {
+    if (ph === 'out' || ph === 'in') { lockLog.dirs.push(s.controls.direction()); lockLog.emote ||= s.emote.visible; lockLog.talking ||= s.talking; }
+    if ((ph === 'out' || ph === 'in') && !lockLog[ph]) { lockLog[ph] = true; ev('keydown', 'Space'); ev('keydown', 'ArrowDown'); }
+    if (ph === 'in' && lockLog.in === true) { lockLog.in = 'released'; ev('keyup', 'Space'); }
+  } });
+  const fadeLockPos = [s.player.x, s.player.y]; run(400); // ArrowDown is still held from inside the fade
+  check('P4 input locked during the fade: no move, no Action, nothing carried over', [lockLog.dirs.every((d) => d === null), lockLog.emote, lockLog.talking, s.emote.visible, [s.player.x, s.player.y], s.controls.direction()], [true, false, false, false, fadeLockPos, null]);
+  ev('keyup', 'ArrowDown'); run(50); ev('keydown', 'Space'); run(FRAME); ev('keyup', 'Space'); run(FRAME);
+  check('P4b a fresh Action after the fade works', s.emote.visible, true); run(600);
+
+  // P5. A key held into the warp (with auto-repeat) or a D-pad held into it doesn't walk on the new map.
+  const repeatKey = (i) => { if (i % 4 === 0) ev('keydown', 'ArrowRight', { repeat: true }); };
+  walkWarp('test-map', mapById('test-map').warps[0], { keepHeld: true, onFrame: repeatKey });
+  const kArrive = [s.player.x, s.player.y]; for (let i = 0; i < 30; i++) { repeatKey(i * 4); run(FRAME); }
+  const kHeld = [[s.player.x, s.player.y], s.controls.direction(), s.player.anims.isPlaying];
+  ev('keyup', 'ArrowRight'); run(50); ev('keydown', 'ArrowRight'); run(200); ev('keyup', 'ArrowRight'); run(50);
+  check('P5 held key + auto-repeat: no walking after the warp until pressed again', [kHeld, s.player.x - kArrive[0]], [[kArrive, null, false], 12]);
+  walkWarp('test-map', mapById('test-map').warps[0], { keepHeld: true, input: 'dpad' });
+  const dArrive = [s.player.x, s.player.y]; run(500);
+  const dHeld = [[s.player.x, s.player.y], dpadEl.dataset.dir ?? null, s.controls.direction()]; // data-dir = D-pad still held
+  pe(window, 'pointerup', 100, 0, 41); run(50); pe(dpadEl, 'pointerdown', 100, 0, 42); run(200); pe(window, 'pointerup', 100, 0, 42); run(50);
+  check('P5b D-pad held through the warp: no walking until pressed again', [dHeld, s.player.x - dArrive[0]], [[dArrive, 'right', null], 12]);
+
+  // P6. The window loses focus during the fade-out and again during the fade-in.
+  const blurAt = { out: 5, in: 5 }; const seen = { out: 0, in: 0 };
+  walkWarp('roosevelt-ave', mapById('roosevelt-ave').warps.find((w) => w.targetMap === 'test-map'), { keepHeld: true, onFrame: (i, ph) => {
+    if (ph in seen && ++seen[ph] === blurAt[ph]) { window.dispatchEvent(new Event('blur')); run(100); window.dispatchEvent(new Event('focus')); }
+  } });
+  const bArrive = landed(); run(400);
+  check('P6 focus lost mid-fade (out and in): warp completes, unlocked, nothing stuck', [bArrive, s.warping, s.controls.isLocked(), s.controls.direction(), [s.player.x, s.player.y]], [expectLanding(mapById('roosevelt-ave').warps.find((w) => w.targetMap === 'test-map')), false, false, null, [bArrive[1], bArrive[2]]]);
+  ev('keyup', 'ArrowLeft'); run(50);
+
+  // P7. Broken links: dev throws (at boot and on use), production falls back.
+  const warns2 = []; const ow = console.warn; console.warn = (...a) => warns2.push(a.join(' '));
+  const strictMsgs = [throwsMsg(() => M.resolveDestination('no-such-map', 'start', true)), throwsMsg(() => M.resolveDestination('roosevelt-ave', 'no-such-spawn', true))];
+  const fb1 = M.resolveDestination('no-such-map', 'x', false), fb2 = M.resolveDestination('roosevelt-ave', 'no-such-spawn', false);
+  console.warn = ow;
+  const tmInfo = mapById('test-map'); tmInfo.warps.push({ objectId: 999, targetMap: 'nope', targetSpawn: 'x', x: 0, y: 0, width: 1, height: 1 }); const bootMsg = throwsMsg(M.validateLinks); tmInfo.warps.pop();
+  check('P7 unknown map/spawn: throws in dev, falls back (with a warning) in production',
+    [strictMsgs, bootMsg, [fb1.map.id, fb1.spawn.spawnId], [fb2.map.id, fb2.spawn.spawnId], warns2.length],
+    [['Unknown map "no-such-map"', 'Map "roosevelt-ave" has no spawn "no-such-spawn"'], 'Map "test-map", warp object 999: Unknown map "nope"', ['test-map', 'start'], ['roosevelt-ave', 'from-test-map'], 2]);
+
+  // P8. Talk to the NPC in each map.
+  const zoneTalk = {};
+  for (const m of M.MAP_LIST) {
+    gotoMap(m.id); const n0 = s.npcs[0]; place(n0.spawn.x, n0.spawn.y + 16, 'up'); press(); run(50);
+    const name = STR_MOD.t(`npc.${n0.spawn.npcId}.name`);
+    zoneTalk[m.id] = [s.npcs.length, s.talking && g.scene.isActive('Dialogue'), D().pages[0].replace(/\n/g, ' ').includes(name), n0.sprite.frame.name % 4];
+    closeDialogue(); zoneTalk[m.id].push(s.talking);
+  }
+  check('P8 dialogue works in each map (opens, names the NPC, NPC turns, closes)', zoneTalk, { 'test-map': [3, true, true, 0, false], 'roosevelt-ave': [1, true, true, 0, false], 'diversity-plaza-74th': [1, true, true, 0, false] });
 } catch (e) {
   R.ERROR = String(e && e.stack || e);
 } finally {
   for (let n = 0; s.talking && n < 30; n++) { ev('keydown', 'Space'); run(FRAME); ev('keyup', 'Space'); run(FRAME); }
+  if (s.info.id !== 'test-map' || s.warping) { s.scene.restart({}); run(100); }
   at(232, 268); s.facing = 'down';
   g.loop.wake();
 }

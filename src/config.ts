@@ -12,10 +12,11 @@ export const BG_COLOR = '#1b1528';
 /**
  * Texture keys. Placeholder art is generated under these keys in BootScene; real art
  * drops in by loading a file under the same key with the same frame size and layout.
- * A Tiled tileset's name must equal its texture key (see TestMapScene).
+ * A Tiled tileset's name must equal its texture key (see MapScene).
  */
 export const TEXTURES = {
   tiles: 'tiles',
+  overhead: 'overhead',
   player: 'player',
   emote: 'emote',
   npc: 'npc',
@@ -24,9 +25,8 @@ export const TEXTURES = {
   textCursor: 'text-cursor',
 } as const;
 
-export const MAPS = {
-  test: 'test-map',
-} as const;
+/** Each half of a warp's fade (out, then in on the next map). Input is locked throughout. */
+export const WARP_FADE_MS = 250;
 
 /** Row order of the player spritesheet. */
 export const DIRECTIONS = ['down', 'left', 'right', 'up'] as const;
@@ -45,11 +45,12 @@ export const NPC_FRAME = { width: 16, height: 24, looks: 3 } as const;
 export const TALK_RANGE = TILE_SIZE;
 
 /**
- * Bitmap font: fixed-width cells. `charWidth` is the advance (glyph + spacing) and
- * `lineHeight` the distance between baselines. A real font drops in under the same key
- * with its own metrics (see DESIGN.md 2.3).
+ * Bitmap font (Spleen 6x12): fixed-width cells. `charWidth` is the advance (glyph + spacing)
+ * and `lineHeight` the distance between baselines. `atlas` is relative to the page, so it
+ * works under any base path. Another font drops in under the same key with its own metrics
+ * (see DESIGN.md 2.3).
  */
-export const FONT = { key: TEXTURES.font, charWidth: 6, lineHeight: 12 } as const;
+export const FONT = { key: TEXTURES.font, atlas: 'assets/fonts/spleen-6x12.png', charWidth: 6, lineHeight: 12 } as const;
 
 /**
  * Dialogue window, in screen pixels. It sits `margin` px from the top of the screen, or
