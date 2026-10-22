@@ -2,8 +2,9 @@ import Phaser from 'phaser';
 import testMap from '../data/maps/test-map.json';
 import { DIRECTIONS, MAPS, PLAYER_FRAME, TEXTURES } from '../config';
 import { generatePlaceholderTextures } from '../systems/placeholderArt';
+import { generatePlaceholderFont } from '../systems/placeholderFont';
 
-/** Loads data, generates placeholder textures, registers animations, then starts the map. */
+/** Loads data, generates placeholder textures and font, registers animations, then starts the map. */
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('Boot');
@@ -19,6 +20,7 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     generatePlaceholderTextures(this);
+    generatePlaceholderFont(this);
 
     // Walk cycle per direction: step A, stand, step B, stand (frame = row * columns + col).
     DIRECTIONS.forEach((dir, row) => {

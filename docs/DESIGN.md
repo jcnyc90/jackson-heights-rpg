@@ -12,7 +12,7 @@ This document has three parts:
 2. **Technical conventions:** set in session 1 to keep future work cheap. They're cheap to change now and get more expensive later.
 3. **Roadmap and open questions.**
 
-Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1.
+Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1. Section 2.11 covers dialogue and NPCs (session 3).
 
 ---
 
@@ -28,7 +28,7 @@ Status column: **Session 1** = applied in the scaffold; **Later** = recorded onl
 | 4 | Core loop | **Delivery orders drive quests** and move the player between zones. | Later |
 | 5 | Antagonist theme | **Gentrification**, rendered with EarthBound-style absurdity. **All developers, landlords, and businesses must be fictional: no real names, logos, or identifiable people.** | Later |
 | 6 | Battles | **EarthBound-style first-person menu battles** with a **rolling HP meter**. Special abilities are **tenant-organizing moves** (e.g. rent strike, petition, block party). | Later |
-| 7 | Language | **English only for now**, but **all player-facing strings live in external JSON data files, keyed by ID**, so localization can be added without refactoring. | Later (session 1 shows no in-game text) |
+| 7 | Language | **English only for now**, but **all player-facing strings live in external JSON data files, keyed by ID**, so localization can be added without refactoring. | Session 3 (`t()` + `src/data/strings/en.json`; see 2.6) |
 | 8 | Saves | **localStorage**. | Later |
 | 9 | Art | Placeholder sprites and tiles **generated in code**. **EarthBound-like pastel palette, chunky dark outlines, 16×16 tiles**, scaled with **crisp pixel rendering (no smoothing)**. Real art replaces placeholders later, so **asset keys and sizes must be swap-friendly**. | Session 1 |
 | 10 | IP | Emulate EarthBound's **style and mechanics only**. **No Nintendo/EarthBound sprites, music, names, fonts, or enemy designs.** | Applies always (all session 1 art is original) |
@@ -38,8 +38,7 @@ Status column: **Session 1** = applied in the scaffold; **Later** = recorded onl
 
 - **Fiction boundary (#5):** real *places* (streets, avenues, Diversity Plaza, the 7 train) set the scene. Every *business, developer, landlord and antagonist* is invented. Real restaurants (e.g. the 74th St momo spots) get fictional stand-ins, not real names or logos.
 - **Strings (#7):** no player-facing text is hard-coded anywhere, in TypeScript or HTML. See convention 2.6.
-  - Session 1 shows no in-game text.
-  - The only exceptions are `index.html`'s `<title>` and `<html lang="en">`. Once the strings lookup exists (session 3), these are set from the strings file at boot.
+  - No exceptions since session 3: `index.html`'s `<title>` and `<html lang>` hold `%t:<id>%` placeholders that a Vite plugin fills from `en.json` at build time, and `main.ts` sets them again from `t()` at boot.
 - **IP (#10):** no ripped assets, no soundalike music, no EarthBound font clones.
   - No EarthBound names: character and place names (e.g. "Ness", "Onett"), ability systems ("PSI"), and menu labels ("Bash", "Goods", "Auto Fight").
   - Mechanics such as the rolling HP meter aren't copyrightable; specific expression is.
@@ -52,10 +51,11 @@ Status column: **Session 1** = applied in the scaffold; **Later** = recorded onl
 ### 2.1 Architecture
 
 - Plain Phaser scenes plus small TypeScript modules. **No ECS, no DI container, no state library.** Add structure only when a second real use case appears.
-- `src/scenes/`: one file per Phaser scene. `BootScene` loads data, generates placeholder textures and registers animations. `TestMapScene` is the walkable test map.
-- `src/systems/`: reusable logic that isn't a scene (input, placeholder art).
+- `src/scenes/`: one file per Phaser scene. `BootScene` loads data, generates placeholder textures and the placeholder font, and registers animations. `TestMapScene` is the walkable test map with NPCs. `DialogueScene` is the text window, launched over the map (2.11).
+- `src/systems/`: reusable logic that isn't a scene (input, placeholder art and font, strings, text layout, NPC parsing).
 - `src/data/`: JSON game data, bundled with the code and validated at build time (a malformed JSON file fails `npm run build`).
-- `public/assets/`: binary assets served as-is (real art, audio). Empty for now.
+- `public/assets/`: binary assets served as-is (real art, audio). Holds only `tilesets/tiles.png`, the exported placeholder tileset Tiled uses (2.4).
+- `tests/browser/`: the regression, render and touch checks, run in the dev server (`tests/browser/README.md`).
 
 ### 2.2 Rendering and scaling
 
@@ -72,30 +72,58 @@ All keys live in `src/config.ts` (`TEXTURES`, `PLAYER_FRAME`).
 |-----|------|---------------|
 | `tiles` | Tileset image | 16×16 tiles, 4 columns × 2 rows (ids 0–7: grass, sidewalk, road, road marking, wall, tree, planter, water) |
 | `player` | Spritesheet | 16×24 frames; **rows** = down, left, right, up; **columns** = stand, step A, step B. Frame index = `row * 3 + col` |
-| `emote` | Image | 10×10 "!" bubble shown above the player's head when Action is pressed |
+| `emote` | Image | 10×10 "!" bubble shown above the player's head when Action is pressed with nobody to talk to |
+| `npc` | Spritesheet | 16×24 frames; **rows** = looks (3), **columns** = standing frame per direction (down, left, right, up). Frame index = `look * 4 + direction` |
+| `font` | Bitmap font (fixed cell) | `FONT` in `config.ts`: 6×12 cells (5×9 glyphs: rows 0–6 cap height, 7–8 descenders), printable ASCII (space to `~`) in `RetroFont.TEXT_SET1` order, 16 per row. White glyphs on transparent |
+| `text-window` | Image | `TEXT_WINDOW` size (240×56): dark panel, 2 px light frame, rounded corners |
+| `text-cursor` | Image | 5×3 "more" triangle that blinks once a page is fully typed |
 
 The player's collision box (`PLAYER_FEET`, 10×8) is centred at the bottom of the frame. It's derived from the frame size, so a different sprite size keeps the box at the feet.
 
 **To replace placeholder art:**
-1. Put the PNG in `public/assets/…`; the tileset goes at `public/assets/tilesets/tiles.png`, where the map already points.
+1. Put the PNG in `public/assets/…`. For the tileset, overwrite `public/assets/tilesets/tiles.png`, where the map already points, and delete the H6 drift check (it compares that file with the placeholder).
 2. Load it in `BootScene.preload()` under the **same key, frame size and layout**.
+3. For a real font: load the image under `TEXTURES.font` and register it with `registerRetroFont()` (fixed cell, `TEXT_SET1` order), or as a BMFont with `this.load.bitmapFont`. Update `FONT` metrics. `DialogueScene` recomputes characters per line and lines per page from them.
 
 `generatePlaceholderTextures()` skips any key that already exists, so no other code changes are needed. The walk animation plays frames `[step A, stand, step B, stand]` at 8 fps.
 
 ### 2.4 Maps (Tiled)
 
-- Maps are **Tiled JSON** (Tiled 1.10+ format), orthogonal, 16×16 tiles, **uncompressed array layer data**, and **embedded tilesets**. Phaser can't read external `.tsx`/`.tsj` tilesets.
+- Maps are **Tiled JSON** (Tiled 1.10+ format), orthogonal, 16×16 tiles, **uncompressed array (CSV) layer data**, and **embedded tilesets**. Phaser can't read external `.tsx`/`.tsj` tilesets; the scene throws if a map has none embedded.
 - **Tileset name = texture key.** The scene adds every tileset in the map by its name, so a tileset named `tiles` draws with texture `tiles`.
 - Required layers:
   - `ground`: tile layer, no collision.
   - `obstacles`: tile layer. Any tile whose tileset entry has the bool property **`collides: true`** blocks movement.
   - `objects`: object layer containing a **point** named **`player-spawn`**, placed at the player's feet.
-- The player collides with a 10×8 box at its feet, so the head can overlap things above it, giving a top-down 3/4 view.
-- The test map is `src/data/maps/test-map.json` (30×20 tiles). It has a street with trees, a plaza with a fountain and planters, building blocks with a 1-tile alley, and a 1-tile-wide serpentine corridor for collision testing.
-- The embedded tileset's `image` is `../../../public/assets/tilesets/tiles.png`, relative to the map file. Phaser ignores the path because it uses the tileset name as the texture key, but Tiled uses it.
-  - That PNG doesn't exist yet, because the placeholder is drawn at runtime, so Tiled shows missing-image tiles. Adding the PNG (real or exported placeholder) is a session 3 task.
-- The test map was generated by a script, not saved by Tiled. Its fields follow Tiled's 1.10 JSON format, but a full open-and-save round trip in Tiled is **untested**.
-  - Phaser ignores external tilesets with only a warning. The scene throws if a map has no embedded tileset.
+- Optional layer `npcs`: object layer, one **point** per NPC at its feet, with custom properties:
+
+  | Property | Type | Value |
+  |----------|------|-------|
+  | `npcId` | string | Unique per map. The name string is `npc.<npcId>.name` in `en.json`. |
+  | `facing` | string | `down`, `left`, `right` or `up`: the way the NPC faces until talked to. |
+  | `dialogueId` | string | A key of `src/data/dialogue.json`. |
+  | `look` | int (optional, default 0) | Row of the `npc` sheet. |
+
+  Object name and class are free text for the map author (the test map uses the npcId and class `npc`); the game ignores them. `readNpcSpawns()` throws on a missing or wrong property, an unknown `dialogueId`, a non-point object or a duplicate `npcId`, so map mistakes fail at load instead of silently dropping an NPC.
+- The player and NPCs collide with a 10×8 box at their feet, so heads can overlap things above them, giving a top-down 3/4 view.
+- The test map is `src/data/maps/test-map.json` (30×20 tiles). It has a street with trees, a plaza with a fountain and planters, building blocks with a 1-tile alley, a 1-tile-wide serpentine corridor for collision testing, and three NPCs: Neighbor A in the plaza west of the spawn, Neighbor B on the north sidewalk, Neighbor C in the south-west corner.
+
+**Tileset image.** The embedded tileset's `image` is `../../../public/assets/tilesets/tiles.png`, relative to the map file. Phaser ignores this path (it draws the tileset from the texture key); Tiled uses it. The PNG is a pixel-exact export of the placeholder tileset the game generates at boot. Regression check H6 fails if the two drift apart. To re-export after changing a tile painter, run `game.textures.getBase64('tiles')` in the dev-server console and save the decoded data URL over the PNG.
+
+**Workflow.**
+1. Open `src/data/maps/test-map.json` in Tiled (1.12.2 verified; `brew install --cask tiled`).
+2. Edit. Keep the tileset embedded. Place NPCs as points in the `npcs` layer with the properties above.
+3. Save (Cmd+S) in place. Tiled writes the same JSON format the game reads.
+4. Run `npm run build` (malformed JSON or type errors fail it) and the regression suite (`tests/browser/README.md`).
+5. Commit the map as Tiled saved it. Don't hand-format it; re-saving an unchanged map from Tiled is byte-identical, so diffs stay small.
+
+**Round trip (verified session 3, Tiled 1.12.2).** The script-written map was opened in the Tiled GUI (0 errors, 0 warnings; tileset image, all four layers and NPC points shown) and saved in place. Compared with the original, the only changes were `tiledversion` 1.11.2 → 1.12.2 and a new `"opacity": 1` on each object (Tiled 1.12 writes it; Phaser ignores it). Tile data, properties, objects and tileset metadata were identical. Tiled's headless writer (`tiled --export-map json`) gives the same output. A second save was byte-identical. In game, all 80 regression checks and the render hashes passed on the Tiled-saved file.
+
+**Flip rules (Phaser 4.2.1).**
+- **Flipping and rotating tiles in Tiled is fine.** Tiled stores H/V/diagonal flips as flag bits on the tile gid. Phaser parses them into each tile's `rotation` and `flipX`, which render correctly in v4. Use Tiled's flip (X, Y) and rotate (Z, Shift+Z) tools freely.
+- **Never flip a tile vertically in code.** `Tile.setFlipY`, `toggleFlipY`, `setFlip(_, true)`, or copying a tile that has `flipY` set, hit v4's `TransformerTile` bug (it adjusts x instead of y) and render the tile in the wrong place. If code ever needs a mirrored tile, add a pre-flipped tile to the tileset instead. Horizontal `setFlipX` in code is unaffected.
+- **Sprites are unaffected:** `Sprite.setFlipX/Y` is a different code path and works.
+- **Animated tiles:** v4 plays Tiled tile `animation` data (v3 drew the first frame). Any tile animation added in Tiled will play in game.
 
 ### 2.5 Input
 
@@ -110,12 +138,15 @@ The player's collision box (`PLAYER_FEET`, 10×8) is centred at the bottom of th
   - **Portrait:** the game is pinned to the top and the controls fill a strip below it.
   - **Landscape:** the controls float over the letterbox bars. The D-pad shrinks to fit the bar, down to a 32 px floor. On 4:3 tablets, foldables and near-square windows the bars are narrower than that, so the controls overlap the edge of the game.
 - `src/systems/controls.ts` merges both sources into `direction()` and `actionPressed()`; touch overrides keyboard. Game code reads only that class.
-- In session 1 the action button has no gameplay; it shows a "!" bubble to confirm the input works.
+- Action talks to the NPC in front of the player (2.11). With nobody there, it shows the "!" bubble from session 1. While the text window is open, Action drives the window and direction input is ignored.
+- Exactly one scene reads input: `TestMapScene` owns `Controls` and forwards Action presses to `DialogueScene.advance()`. A second `Controls` in another scene would let one key press be seen twice (once per scene's key object), so the press that closes a window could immediately reopen it.
 
-### 2.6 Strings (proposed for when text arrives; not implemented)
+### 2.6 Strings (implemented in session 3)
 
 - `src/data/strings/en.json`: flat map of stable IDs to text, e.g. `"npc.plaza.vendor.greeting": "…"`.
-- A single lookup `t(id, params?)` with `{name}`-style interpolation. Missing IDs render as the ID itself so they're easy to spot.
+- A single lookup `t(id, params?)` in `src/systems/strings.ts` with `{name}`-style interpolation. Missing IDs render as the ID itself so they're easy to spot; dev builds also `console.warn` once per missing ID (the warning is compiled out of production builds).
+- Dialogue structure lives apart from text: `src/data/dialogue.json` maps a dialogue ID to a list of string IDs. Each entry starts a new page; a long entry continues on the next page automatically, so a longer translation never overflows the window.
+- Strings must use only characters the font has (printable ASCII for the placeholder). Regression check H4 fails otherwise. Write straight quotes and apostrophes.
 - IDs never change meaning; reworded text keeps its ID. Text widths must tolerate about 40% expansion for future locales.
 
 ### 2.7 Saves (proposed; not implemented)
@@ -130,6 +161,7 @@ The player's collision box (`PLAYER_FEET`, 10×8) is centred at the bottom of th
   - `source-map-js` 1.2.2, for advisory GHSA-68fv-2mgg-jv7q.
   - `vite` 8.3.3, which fixes a dev-server `fs.allow` check bypass for `?vite-wasm-instance`; no advisory has been published yet.
   - Session 2 needed no override: `phaser` 4.2.1 was released 2026-07-09, well before the cutoff.
+  - Session 3: `vite` 8.3.3 → 8.3.4 (released 2026-10-08, installed 2026-10-22 with `--before` 14 days back; no override). 8.3.5 (2026-10-21) is inside the cooldown and was not taken.
 - GitHub Actions are pinned to full commit SHAs. Nothing bumps these pins automatically. Update them by hand under the same cooldown policy; no Dependabot.
 - Node 20 reached end of life on 2026-04-30. `engines` requires Node 22.12 or later, and CI uses Node 24.
 
@@ -140,6 +172,10 @@ The player's collision box (`PLAYER_FEET`, 10×8) is centred at the bottom of th
 - **Pixel-perfect scaling:** `Scale.FIT` can produce non-integer scale factors (see 2.2).
 - **No Content Security Policy:** GitHub Pages can't send headers. A `<meta>` CSP is possible once there's any dynamic content.
 - **No Canvas fallback on rare GPUs:** see 2.10.
+- **Placeholder font is ASCII only:** no accents (é, ñ) or other scripts. Fine for English placeholders; real names and any localization need the real font (2.11).
+- **Text window speed is fixed** at 30 characters/s; a text-speed setting belongs to the settings work (roadmap session 6).
+- **Tiles don't y-sort:** sprites sort by feet y, but all tiles in `obstacles` draw under every sprite. Tall tiles that should cover the player (tree canopies, awnings) need a separate `above` layer later.
+- **The tileset PNG is a copy** of generated art. H6 guards drift; it goes away when real tiles replace the placeholder.
 
 ### 2.10 Phaser 4 notes (port from 3.90.0 to 4.2.1, session 2)
 
@@ -168,9 +204,30 @@ Behaviour parity was verified against Phaser 3 baselines recorded in the same se
 **Gotchas for upcoming sessions:**
 - **Flipping tiles in code (session 3):** v4's `TransformerTile` has a vertical-flip bug (it adjusts x instead of y). It only triggers through runtime `Tile.setFlipY` / `toggleFlipY` / `setFlip(_, true)`, or by copying such a tile. Tiled's own flips and rotations are parsed into `rotation` + `flipX` and render correctly. Don't flip tiles on Y in code.
 - **Tiled tile animations now play:** v4 animates tiles that have Tiled `animation` data, where v3 drew a still frame.
-- **Sprite-vs-sprite physics changed:** fixes in `ProcessX` and `separateCircle`. Sprite-vs-tile is byte-identical. Re-check push behaviour when NPC colliders arrive.
+- **Sprite-vs-sprite physics changed:** fixes in `ProcessX` and `separateCircle`. Sprite-vs-tile is byte-identical. Re-checked in session 3 for the NPC colliders (rectangular bodies, NPCs immovable and not pushable): the player stops flush against an NPC from all four sides at exact pixels, the NPC never moves, and a 1,024-frame fuzz walk around an NPC never overlaps bodies (checks L1–L4). Moving NPCs or dynamic-vs-dynamic pushing will need their own checks.
+- **`RetroFont.Parse` typings are wrong (4.2.1):** they declare it returns the font data, but it returns the whole cache entry `{ data, texture, frame }`. Pass its result straight to `cache.bitmapFont.add()` (see `registerRetroFont`).
 - **Licence notices:** minification strips all licence comments, including those of the libraries Phaser inlines (Matter.js, poly-decomp, Earcut, Simplify.js, psrdnoise, eventemitter3 and a few snippets). Keeping legal comments would add about 294 KB and still miss Earcut and Simplify. Instead, `vite.config.ts` adds one `postBanner`, and `public/THIRD-PARTY-NOTICES.txt` carries every required text. Re-check it on each Phaser upgrade (README → License).
 - **Other v4 changes we don't use:** FX/masks became filters, the tint API changed (`setTintFill` was removed), `Geom.Point` became `Vector2`, `Math.TAU` is now 2π, DynamicTexture needs `render()`, Mesh/Plane were removed. See the migration guide in `node_modules/phaser/skills/v3-to-v4-migration/`.
+
+### 2.11 Dialogue and NPCs (session 3)
+
+**Text window** (`DialogueScene`):
+- A separate scene, launched over the map with already-localized text and stopped on close. It reads no input (2.5).
+- 240×56 window, 8 px from the top of the screen, or from the bottom when the player is in the top half of the screen (near the map's top edge the camera stops scrolling, and a top window would cover the speakers).
+- Text is word-wrapped **before** typing starts, so a word never jumps to the next line mid-type. Characters per line and lines per page come from the font metrics: 36 × 3 with the placeholder font.
+- Typewriter at 30 characters/s. **Action:** while typing, show the rest of the page; on a complete page, turn the page; on the last complete page, close. A blinking triangle shows when a page is complete.
+- Player movement is locked from the press that opens the window to the press that closes it. The closing press is consumed, so it never reopens the window or shows the emote.
+
+**Talking:**
+- Action checks a strip `TALK_RANGE` (16 px, one tile) deep directly in front of the player's feet box, as wide as the feet box, in the facing direction. The nearest NPC whose feet box overlaps that strip is the one you talk to. A gap of 15 px between feet boxes talks; 16 px doesn't (check K2).
+- The NPC turns to face the player and keeps that facing afterwards.
+- NPC names come from `npc.<npcId>.name` and are passed to every line as `{name}`.
+
+**NPCs:** physics sprites with the same 10×8 feet box as the player, immovable and not pushable. They never move in session 3.
+
+**Depth:** every sprite's depth is its feet y, updated every frame for the player, so whoever stands lower on screen draws in front. Tile layers sit at negative depth (below all sprites) and the emote at 1e6 (above all).
+
+**Placeholder font:** an original 5×9 pixel font drawn in code (`placeholderFont.ts`), not derived from any existing font file. It exists so the window works before a real font is chosen. Font proposals for the owner's pick are in the session 3 report. The real font must be licence-verified before it ships, added to `public/THIRD-PARTY-NOTICES.txt` if third-party, and must cover the characters of real names (accents at least).
 
 ---
 
@@ -182,7 +239,7 @@ Each session should produce one small, testable result and end with a report.
 |---------|------|-------|
 | **1** ✅ | Scaffold | Vite + TS + Phaser 3, placeholder art, walkable Tiled test map with collision, keyboard and touch input, deploy config, docs. |
 | **2** ✅ | Licence, engine, ship | MIT + CC BY-NC-SA 4.0 licensing; Phaser 3.90.0 → 4.2.1 with verified behaviour parity; keyboard blur fix; public repo and GitHub Pages deploy. |
-| **3** | Talk to someone + Tiled pipeline | Strings JSON and `t()` (also setting `<title>` and `lang`); EarthBound-style text window (typewriter text, original or open-licence pixel font); NPCs placed from Tiled objects; action button checks the faced tile; y-sorted depth. Tiled pipeline: a real or exported tileset PNG at `public/assets/tilesets/tiles.png`, a verified Tiled open-and-save round trip, and an object-layer convention for NPCs. |
+| **3** ✅ | Talk to someone + Tiled pipeline | Strings JSON and `t()` (also setting `<title>` and `lang`); EarthBound-style text window (typewriter text, original or open-licence pixel font); NPCs placed from Tiled objects; action button checks the faced tile; y-sorted depth. Tiled pipeline: a real or exported tileset PNG at `public/assets/tilesets/tiles.png`, a verified Tiled open-and-save round trip, and an object-layer convention for NPCs. |
 | **4** | Zones and travel | Map registry, door/warp objects in Tiled, fade transitions, spawn points per entrance. First layout pass of the Roosevelt Ave corridor stub and one mini-zone (74th St / Diversity Plaza). |
 | **5** | Delivery loop v1 | Order data model (JSON): pickup, dropoff, item, reward. Accept, pick up and deliver flow; on-screen order ticket. Orders send the player across zones. |
 | **6** | Saves and title | Versioned localStorage saves, autosave on zone change or delivery, title screen with Continue/New, settings stub (text speed). |

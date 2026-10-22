@@ -2,8 +2,12 @@ import Phaser from 'phaser';
 import './style.css';
 import { BG_COLOR, GAME_HEIGHT, GAME_WIDTH } from './config';
 import { BootScene } from './scenes/BootScene';
+import { DialogueScene } from './scenes/DialogueScene';
 import { TestMapScene } from './scenes/TestMapScene';
+import { applyDocumentStrings } from './systems/strings';
 import { initTouchControls } from './systems/touchControls';
+
+applyDocumentStrings();
 
 // Before the game boots, so the canvas is measured with the touch-control strip in place.
 initTouchControls();
@@ -26,7 +30,8 @@ const game = new Phaser.Game({
     arcade: { debug: import.meta.env.DEV && new URLSearchParams(location.search).has('debug') },
   },
   audio: { noAudio: true }, // no audio yet; avoids creating an AudioContext
-  scene: [BootScene, TestMapScene],
+  // Later scenes render on top: the text window draws over the map.
+  scene: [BootScene, TestMapScene, DialogueScene],
 });
 
 // Dev only: expose the game for poking at it from the browser console.

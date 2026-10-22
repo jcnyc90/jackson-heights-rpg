@@ -1,5 +1,5 @@
 import type Phaser from 'phaser';
-import { DIRECTIONS, PLAYER_FRAME, TEXTURES, TILE_SIZE, type Direction } from '../config';
+import { DIRECTIONS, NPC_FRAME, PLAYER_FRAME, TEXT_WINDOW, TEXTURES, TILE_SIZE, type Direction } from '../config';
 
 // Placeholder art drawn with Canvas 2D at boot. Throwaway by design: real art replaces
 // it by loading files under the same texture keys (see generatePlaceholderTextures).
@@ -30,6 +30,8 @@ const C = {
   waterLight: '#e0f6ff',
   white: '#fffaf0',
   skin: '#c98d63',
+  skinLight: '#f0c39a',
+  skinDark: '#8a5a3c',
   hair: '#3b2a2a',
   cap: '#ff8f7a',
   jacket: '#6fcfc4',
@@ -173,10 +175,29 @@ function paintRoad(ctx: Ctx, x: number, y: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// Player: a delivery worker with a cap and an insulated bag, 16x24 per frame.
+// People, 16x24 per frame. The player is a delivery worker with a cap and an
+// insulated bag; NPCs are the same body with other colours and no cap or bag.
 // Drawn as rectangles: an outline pass (each part grown by 1px) then a fill pass,
 // which gives one chunky silhouette outline.
 // ---------------------------------------------------------------------------
+
+interface Look {
+  skin: string;
+  hair: string;
+  top: string;
+  pants: string;
+  cap?: string;
+  bag?: string;
+}
+
+const PLAYER_LOOK: Look = { skin: C.skin, hair: C.hair, top: C.jacket, pants: C.pants, cap: C.cap, bag: C.bag };
+
+/** One per row of the NPC sheet (NPC_FRAME.looks). Placeholder people, not real ones. */
+const NPC_LOOKS: Look[] = [
+  { skin: C.skinLight, hair: C.trunk, top: C.planter, pants: C.road },
+  { skin: C.skinDark, hair: C.hair, top: C.flowerPink, pants: C.pants },
+  { skin: C.skin, hair: C.mortar, top: C.flowerYellow, pants: C.leafDark },
+];
 
 interface Part {
   x: number;
@@ -188,7 +209,7 @@ interface Part {
 }
 
 /** step: 0 = stand, 1 = left foot forward, 2 = right foot forward. */
-function drawPlayer(ctx: Ctx, ox: number, oy: number, dir: Direction, step: number): void {
+function drawPerson(ctx: Ctx, ox: number, oy: number, dir: Direction, step: number, look: Look): void {
   const parts: Part[] = [];
   const add = (x: number, y: number, w: number, h: number, color: string, outline = true) =>
     parts.push({ x, y, w, h, color, outline });
@@ -196,38 +217,45 @@ function drawPlayer(ctx: Ctx, ox: number, oy: number, dir: Direction, step: numb
   const swing = step === 0 ? 0 : step === 1 ? 1 : -1;
 
   // Bag behind the body in front/side views.
-  if (dir === 'down') add(3, 9, 10, 4, C.bag);
-  if (dir === 'left') add(10, 10, 5, 7, C.bag);
-  if (dir === 'right') add(1, 10, 5, 7, C.bag);
+  if (look.bag) {
+    if (dir === 'down') add(3, 9, 10, 4, look.bag);
+    if (dir === 'left') add(10, 10, 5, 7, look.bag);
+    if (dir === 'right') add(1, 10, 5, 7, look.bag);
+  }
 
   // Legs: the stepping leg is lifted 1px; in side view the legs also spread apart.
   const [lx, rx] = side && step === 0 ? [6, 7] : [5, 8];
-  add(lx, 18, 3, step === 1 ? 4 : 5, C.pants);
-  add(rx, 18, 3, step === 2 ? 4 : 5, C.pants);
+  add(lx, 18, 3, step === 1 ? 4 : 5, look.pants);
+  add(rx, 18, 3, step === 2 ? 4 : 5, look.pants);
 
-  add(4, 11, 8, 8, C.jacket); // torso
+  add(4, 11, 8, 8, look.top); // torso
 
   if (side) {
-    add(7 + swing, 12, 2, 6, C.jacket);
-    add(7 + swing, 17, 2, 1, C.skin, false);
+    add(7 + swing, 12, 2, 6, look.top);
+    add(7 + swing, 17, 2, 1, look.skin, false);
   } else {
-    add(2, 12 + swing, 2, 6, C.jacket);
-    add(12, 12 - swing, 2, 6, C.jacket);
-    add(2, 17 + swing, 2, 1, C.skin, false);
-    add(12, 17 - swing, 2, 1, C.skin, false);
+    add(2, 12 + swing, 2, 6, look.top);
+    add(12, 12 - swing, 2, 6, look.top);
+    add(2, 17 + swing, 2, 1, look.skin, false);
+    add(12, 17 - swing, 2, 1, look.skin, false);
   }
 
-  if (dir === 'up') add(3, 10, 10, 8, C.bag); // back view: bag covers the back
+  if (dir === 'up' && look.bag) add(3, 10, 10, 8, look.bag); // back view: bag covers the back
 
-  add(4, 3, 8, 8, C.skin); // head
-  if (dir === 'up') add(4, 4, 8, 6, C.hair, false);
-  if (dir === 'left') add(9, 5, 3, 4, C.hair, false);
-  if (dir === 'right') add(4, 5, 3, 4, C.hair, false);
+  add(4, 3, 8, 8, look.skin); // head
+  if (dir === 'up') add(4, 4, 8, 6, look.hair, false);
+  if (dir === 'left') add(9, 5, 3, 4, look.hair, false);
+  if (dir === 'right') add(4, 5, 3, 4, look.hair, false);
 
-  add(4, 1, 8, 4, C.cap);
-  if (dir === 'down') add(3, 5, 10, 1, C.cap);
-  if (dir === 'left') add(1, 4, 4, 2, C.cap);
-  if (dir === 'right') add(11, 4, 4, 2, C.cap);
+  if (look.cap) {
+    add(4, 1, 8, 4, look.cap);
+    if (dir === 'down') add(3, 5, 10, 1, look.cap);
+    if (dir === 'left') add(1, 4, 4, 2, look.cap);
+    if (dir === 'right') add(11, 4, 4, 2, look.cap);
+  } else {
+    // Bare head: hair on top (and the back of the head in the back view).
+    add(4, 3, 8, dir === 'up' ? 7 : 2, look.hair, false);
+  }
 
   if (dir === 'down') {
     add(6, 7, 1, 2, C.outline, false);
@@ -266,7 +294,7 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
   const { width: fw, height: fh, columns } = PLAYER_FRAME;
   const sheet = make(TEXTURES.player, fw * columns, fh * DIRECTIONS.length, (ctx) => {
     DIRECTIONS.forEach((dir, row) => {
-      for (let col = 0; col < columns; col++) drawPlayer(ctx, col * fw, row * fh, dir, col);
+      for (let col = 0; col < columns; col++) drawPerson(ctx, col * fw, row * fh, dir, col, PLAYER_LOOK);
     });
   });
   // Numbered frames, same as a spritesheet loaded with this.load.spritesheet().
@@ -277,4 +305,36 @@ export function generatePlaceholderTextures(scene: Phaser.Scene): void {
   }
 
   make(TEXTURES.emote, EMOTE[0].length, EMOTE.length, (ctx) => pixelMap(ctx, 0, 0, EMOTE, { o: C.outline, W: C.white }));
+
+  // NPCs: row = look, column = standing frame per direction (frame = look * 4 + direction).
+  const { width: nw, height: nh, looks } = NPC_FRAME;
+  const npcs = make(TEXTURES.npc, nw * DIRECTIONS.length, nh * looks, (ctx) => {
+    NPC_LOOKS.forEach((look, row) => DIRECTIONS.forEach((dir, col) => drawPerson(ctx, col * nw, row * nh, dir, 0, look)));
+  });
+  if (npcs) {
+    for (let i = 0; i < DIRECTIONS.length * looks; i++) {
+      npcs.add(i, 0, (i % DIRECTIONS.length) * nw, Math.floor(i / DIRECTIONS.length) * nh, nw, nh);
+    }
+  }
+
+  make(TEXTURES.textWindow, TEXT_WINDOW.width, TEXT_WINDOW.height, (ctx) => drawWindow(ctx, TEXT_WINDOW.width, TEXT_WINDOW.height));
+  make(TEXTURES.textCursor, CURSOR[0].length, CURSOR.length, (ctx) => pixelMap(ctx, 0, 0, CURSOR, { W: C.white }));
+}
+
+// ---------------------------------------------------------------------------
+// Text window: dark panel, light 2px frame, outline, rounded corners.
+// ---------------------------------------------------------------------------
+
+const CURSOR = ['WWWWW', '.WWW.', '..W..'];
+
+function drawWindow(ctx: Ctx, w: number, h: number): void {
+  // Outline and panel, with the four corner pixels cut to round it off.
+  rect(ctx, C.outline, 1, 0, w - 2, h);
+  rect(ctx, C.outline, 0, 1, w, h - 2);
+  // Light frame ring, 2px thick, inset 1px, with rounded corners.
+  rect(ctx, C.white, 3, 1, w - 6, 2);
+  rect(ctx, C.white, 3, h - 3, w - 6, 2);
+  rect(ctx, C.white, 1, 3, 2, h - 6);
+  rect(ctx, C.white, w - 3, 3, 2, h - 6);
+  for (const [cx, cy] of [[2, 2], [w - 3, 2], [2, h - 3], [w - 3, h - 3]]) rect(ctx, C.white, cx, cy);
 }

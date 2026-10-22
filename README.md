@@ -4,7 +4,7 @@ An EarthBound-inspired browser RPG set in Jackson Heights, Queens. Built with Ph
 
 Play it: <https://jcnyc90.github.io/jackson-heights-rpg/>
 
-> **Status: early scaffold.** There's a walkable test map with collision, keyboard and touch controls, and placeholder art generated in code. No story, dialogue, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
+> **Status: early scaffold.** There's a walkable test map with collision, keyboard and touch controls, placeholder art generated in code, and three placeholder NPCs you can talk to (EarthBound-style text window). No story, quests, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
 
 ## Requirements
 
@@ -25,9 +25,9 @@ Open <http://localhost:5173>. Add `?debug` to the URL to draw collision boxes (d
 | Action | Keyboard | Touch |
 |--------|----------|-------|
 | Move (4-way) | Arrow keys / WASD | On-screen D-pad |
-| Action | Space / Enter / Z | Round button |
+| Action (talk / next page) | Space / Enter / Z | Round button |
 
-Touch controls appear only on touch devices.
+Touch controls appear only on touch devices. Face an NPC and press Action to talk; Action finishes the current page, then turns the page, then closes the window. You can't walk while the window is open.
 
 ### Test on a phone
 
@@ -79,15 +79,23 @@ src/
   config.ts                resolution, tile size, texture keys, sprite layout
   style.css                full-screen layout, touch controls
   scenes/
-    BootScene.ts           load data, generate placeholder art, register animations
-    TestMapScene.ts        walkable test map
+    BootScene.ts           load data, generate placeholder art and font, register animations
+    TestMapScene.ts        walkable test map, NPCs, talking, depth sorting
+    DialogueScene.ts       text window (typewriter, pages), launched over the map
   systems/
     controls.ts            keyboard + touch -> direction / action
     touchControls.ts       on-screen D-pad + action button (DOM)
-    placeholderArt.ts      code-drawn placeholder tiles and sprites
+    placeholderArt.ts      code-drawn placeholder tiles, sprites and window frame
+    placeholderFont.ts     code-drawn placeholder pixel font
+    strings.ts             t(id, params) lookup for all player-facing text
+    textLayout.ts          word wrap + pagination for the text window
+    npcs.ts                reads and validates NPCs from the Tiled "npcs" layer
   data/
-    maps/test-map.json     Tiled map (30x20)
-public/assets/             real art/audio goes here (served as-is)
+    strings/en.json        every player-facing string, keyed by ID
+    dialogue.json          dialogue ID -> list of string IDs
+    maps/test-map.json     Tiled map (30x20), saved by Tiled 1.12
+public/assets/tilesets/tiles.png  placeholder tileset exported for Tiled (see Editing maps)
+tests/browser/             regression, render and touch checks (run in the dev server)
 public/THIRD-PARTY-NOTICES.txt  licences of bundled third-party code (served with the game)
 docs/DESIGN.md             locked decisions, conventions, Phaser 4 notes, roadmap
 LICENSE                    MIT (code)
@@ -111,7 +119,7 @@ Code and content are licensed separately. Copyright (c) 2026 jcnyc90.
 
 | License | Applies to |
 |---------|------------|
-| **MIT** ([`LICENSE`](LICENSE)) — code | `src/**` except `src/data/**` (including `src/systems/placeholderArt.ts`: its code-drawn placeholder art is MIT like the rest of the code, and replacing it later doesn't revoke that), `src/style.css`, `index.html`, build and tooling files (`package.json`, `package-lock.json`, `tsconfig.json`, `vite.config.ts`, `.github/**`, dotfiles), and this `README.md` |
+| **MIT** ([`LICENSE`](LICENSE)) — code | `src/**` except `src/data/**` (including `src/systems/placeholderArt.ts` and `src/systems/placeholderFont.ts`: their code-drawn placeholder art and font are MIT like the rest of the code, and replacing them later doesn't revoke that), `tests/**`, `src/style.css`, `index.html`, build and tooling files (`package.json`, `package-lock.json`, `tsconfig.json`, `vite.config.ts`, `.github/**`, dotfiles), and this `README.md` |
 | **CC BY-NC-SA 4.0** ([`LICENSE-CONTENT`](LICENSE-CONTENT)) — content | `src/data/**` (maps now; dialogue, story text and other game data later), `public/assets/**` (art, audio), and `docs/**` (design and narrative documents) |
 
 Content paths take precedence over code paths. Anything not listed under content is code and falls under MIT, except the licence and notice files themselves (`LICENSE`, `LICENSE-CONTENT`, `public/THIRD-PARTY-NOTICES.txt`), which keep their own terms. `package.json` declares `"license": "MIT"` for the code.
@@ -130,6 +138,6 @@ grep -nE "ISC License|Redistribution and use|Copyright \(c\)|@license" node_modu
 
 Maps are Tiled JSON with embedded tilesets. The layer and property conventions are in [`docs/DESIGN.md` §2.4](docs/DESIGN.md#24-maps-tiled).
 
-The map's tileset points at `public/assets/tilesets/tiles.png`. That file doesn't exist yet, because the placeholder tileset is drawn at runtime. Until a PNG is added there, Tiled opens the map with missing-image tiles.
+The map's tileset points at `public/assets/tilesets/tiles.png`, a pixel-exact export of the placeholder tileset that the game draws at runtime (a regression check fails if they drift apart). The game itself doesn't load the PNG yet; it will once real tiles replace the placeholder. The PNG is under `public/assets/**`, so it's CC BY-NC-SA by path, but it's also an export of MIT placeholder art, so the MIT grant for that art still applies.
 
-The test map was generated by a script, and a full open-and-save round trip in Tiled hasn't been tested yet. When saving from Tiled, keep the tileset **embedded**; Phaser ignores external tilesets.
+The map opens and saves cleanly in Tiled 1.12 (round trip verified in session 3). The workflow, NPC layer and flip rules are in [`docs/DESIGN.md` §2.4](docs/DESIGN.md#24-maps-tiled). Keep the tileset **embedded**; Phaser ignores external tilesets.
