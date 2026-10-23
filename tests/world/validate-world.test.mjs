@@ -32,7 +32,7 @@ test('the shipped dataset covers all four locked zones and every fact is checked
 
 test('rejects a non-object and a wrong schemaVersion', () => {
   assert.deepEqual(validateWorld(null).errors, ['dataset must be a JSON object']);
-  expectError((d) => (d.schemaVersion = 1), /schemaVersion must be 2/);
+  expectError((d) => (d.schemaVersion = 2), /schemaVersion must be 3/);
 });
 
 test('rejects duplicate and malformed ids', () => {
@@ -85,13 +85,14 @@ test('a segment belongs to at most one zone, and an unmapped one is in none', ()
   expectError((d) => byId(d.zones, 'ave-37').segments.push('seg-roosevelt-74-75'), /segment "seg-roosevelt-74-75" is in two zones/);
   expectError((d) => (byId(d.segments, 'seg-37ave-73-74').unmapped = 'no'), /segment "seg-37ave-73-74" is in zone "ave-37" but marked unmapped/);
   const d = copy();
-  delete byId(d.segments, 'seg-82-37ave-roosevelt').unmapped;
-  assert.ok(validateWorld(d).warnings.includes('segment "seg-82-37ave-roosevelt" is in no zone and gives no "unmapped" reason'));
+  delete byId(d.segments, 'seg-35ave-88-89').unmapped;
+  assert.ok(validateWorld(d).warnings.includes('segment "seg-35ave-88-89" is in no zone and gives no "unmapped" reason'));
 });
 
 test('connections: two zones that both touch the node, open or wall, open ones make every zone reachable', () => {
   const open74 = 'conn-ave-37-diversity-plaza-74th-74-37ave';
-  expectError((d) => (byId(d.connections, open74).at = 'n-90-roosevelt'), /node "n-90-roosevelt" is not on a segment of zone "ave-37"/);
+  expectError((d) => (byId(d.connections, open74).at = 'n-90-roosevelt'), /node "n-90-roosevelt" is not on a segment of zone "diversity-plaza-74th"/);
+  expectError((d) => (byId(d.connections, open74).at = 'n-82-35ave'), /node "n-82-35ave" is not on a segment of zone "ave-37"/);
   expectError((d) => (byId(d.connections, open74).zones = ['ave-37', 'ave-37']), /connects a zone to itself/);
   expectError((d) => (byId(d.connections, open74).kind = 'door'), /kind must be one of open, wall/);
   expectError((d) => d.connections.push({ ...byId(d.connections, open74), id: 'conn-dup' }), /a second connection between the same zones at "n-74-37ave"/);
@@ -107,7 +108,7 @@ test('map split plan: each zone segment in one of its maps, sizes capped, seams 
   expectError((d) => byId(d.maps, 'roosevelt-ave-79-84').segments.push('seg-roosevelt-74-75'), /segment "seg-roosevelt-74-75" is in two maps/);
   expectError((d) => (byId(d.maps, 'roosevelt-ave').segments = byId(d.maps, 'roosevelt-ave').segments.slice(1)), /segment "seg-roosevelt-74-75" \(zone "roosevelt-ave"\) is in none of the zone's maps/);
   expectError((d) => byId(d.maps, 'roosevelt-ave').segments.push('seg-37ave-89-90'), /segment "seg-37ave-89-90" is not in zone "roosevelt-ave"/);
-  expectError((d) => (byId(d.maps, 'roosevelt-ave').tiles = [MAX_MAP_SIDE + 1, 14]), /longer than 96 on a side/);
+  expectError((d) => (byId(d.maps, 'roosevelt-ave').tiles = [MAX_MAP_SIDE + 1, 16]), /longer than 64 on a side/);
   expectError((d) => (byId(d.maps, 'roosevelt-ave').status = 'done'), /status must be one of proposed, built/);
   expectError((d) => (d.mapConnections = d.mapConnections.filter((m) => !m.maps.includes('roosevelt-ave-84-90'))), /share node "n-84-roosevelt" but no map connection lists it/);
   expectError((d) => byId(d.mapConnections, 'mconn-roosevelt-ave-roosevelt-ave-79-84').at.push('n-90-roosevelt'), /node "n-90-roosevelt" is not on both maps/);
@@ -129,4 +130,36 @@ test("landmarks must be marked fictional, sit in the anchor's zone and at one an
   expectError((d) => (byId(d.landmarks, 'lm-food-a').fictional = false), /landmark "lm-food-a": must have "fictional": true/);
   expectError((d) => (byId(d.anchors, 'rav-76-1').landmark = 'lm-shop-b'), /landmark "lm-shop-b" is in another zone/);
   expectError((d) => (byId(d.anchors, 'plaza-73-1').landmark = 'lm-shop-b'), /landmark "lm-shop-b" is already at another anchor/);
+});
+
+test('layout: well-formed, covers every node, and fixes each map\'s tile size', () => {
+  expectError((d) => (d.layout.tileX = 0), /layout.tileX: must be a positive integer/);
+  expectError((d) => delete d.layout.halfWidth.default, /layout.halfWidth: needs a positive integer "default"/);
+  expectError((d) => (d.layout.halfWidth['no-such-street'] = 2), /layout.halfWidth: unknown street "no-such-street"/);
+  expectError((d) => (d.layout.rowsY = [[0, 0], [-1, 12]]), /layout.rowsY: pair 1 must be greater than pair 0/);
+  expectError((d) => d.layout.rowsY.pop(), /node "n-75-bway": grid y 3 is outside layout.rowsY/);
+  expectError((d) => (byId(d.maps, 'roosevelt-ave').tiles = [56, 20]), /map "roosevelt-ave": tiles 56x20 don't match the layout \(56x16\)/);
+  expectError((d) => (d.layout.margin = 9), /map "roosevelt-ave": tiles 56x16 don't match the layout \(58x18\)/);
+  assert.ok(real.maps.every((m) => Math.max(...m.tiles) <= MAX_MAP_SIDE));
+});
+
+test('session 6c decisions: 34th Ave is a paseo, and the cross streets link 37th Ave and Roosevelt Ave', () => {
+  const ave34 = real.segments.filter((s) => s.street === 'ave-34');
+  assert.equal(ave34.length, 11);
+  assert.deepEqual(ave34.filter((s) => s.use !== 'plaza').map((s) => s.id), []);
+  assert.ok(ave34.every((s) => s.sources.includes('dot-34ave-open-street')));
+  const cross = [78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90];
+  const ave37 = byId(real.zones, 'ave-37').segments;
+  for (const n of cross) {
+    const s = byId(real.segments, `seg-${n}-37ave-roosevelt`);
+    assert.equal(s.unmapped, undefined, s.id);
+    assert.ok(s.sources.includes('dcp-lion') && s.lion.length > 0, s.id);
+    assert.ok(ave37.includes(s.id), s.id);
+    const c = real.connections.find((x) => x.at === `n-${n}-roosevelt` && x.zones.includes('ave-37') && x.zones.includes('roosevelt-ave'));
+    assert.equal(c?.kind, 'open', `n-${n}-roosevelt`);
+  }
+  // A cross street that loses its open connection leaves a warning (a shared node with no decision).
+  const d = copy();
+  d.connections = d.connections.filter((c) => c.at !== 'n-82-roosevelt');
+  assert.ok(validateWorld(d).warnings.includes('zones "roosevelt-ave" and "ave-37" share node "n-82-roosevelt" with no connection (open or wall) there'));
 });

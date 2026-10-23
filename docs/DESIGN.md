@@ -307,9 +307,9 @@ The Dispatcher's own `dialogueId` lines come first, then the order line. NPCs co
 
 The Dispatcher stands on the test map's south-east sidewalk at (440, 288), outside every session 1–4 render shot and walk.
 
-### 2.14 World dataset (sessions 6a, 6b)
+### 2.14 World dataset (sessions 6a, 6b, 6c)
 
-The real geography the maps will be built from, kept as data: `src/data/world/jackson-heights.json` (schema version 2). The game doesn't load it yet; session 6c turns it into Tiled maps. Check it with `npm run validate:world` (the validator, `scripts/validate-world.mjs`) and `npm run test:world` (its tests).
+The real geography the maps are built from, kept as data: `src/data/world/jackson-heights.json` (schema version 3: 6c added the `layout` block). The game doesn't load it; session 6c turns it into Tiled maps. Check it with `npm run validate:world` (the validator, `scripts/validate-world.mjs`) and `npm run test:world` (its tests).
 
 **Bounds (6b).** All four zones of locked decision #1, at their verified extent: west 73rd St, east 90th St, north 34th Ave (Northern Blvd only at the 78th Street Plaza), south Roosevelt Ave plus the station triangle down to Broadway at 74th–75th St. 6a's first-pass bounds were Roosevelt Ave 73rd–75th St with three zones; the owner's 6b brief widened them to all four zones at their real extent. The exact edges below are Claude's proposal within that brief.
 
@@ -325,6 +325,7 @@ The real geography the maps will be built from, kept as data: `src/data/world/ja
 | `parks-properties` | Parks Properties, `enfh-gkve` (Travers Park, Q303) | rows updated 2026-10-16 |
 | `mta-stations` / `mta-entrances` | MTA Subway Stations `39hk-dx4f` / Entrances and Exits: 2024 `i9wp-a4ja` (data.ny.gov) | rows updated 2026-10-23 / 2025-12-05 |
 | `nypd-advisory-2023-06`, `cbs-queens-pride-2026` | Queens Pride Parade closures: NYPD 2023 advisory; 2026 DOT closures as reported by CBS New York | 2023, 2026 |
+| `dot-34ave-open-street`, `dot-projects-2025` | NYC DOT: 34th Avenue Open Street (nyc.gov/34ave) and Current Projects 2025 (6c; raw pages in `logs/s6c-src/`) | read 2026-10-23 |
 | `nyc-opendata-faq`, `nyc-terms`, `open-ny-terms` | Licence terms | read 2026-10-23 |
 
 The 6a search-summary sources (Wikipedia, the MTA line map, the CECM and DOT 2015 plaza pages, a StreetEasy building listing, and the "Queens grid" general-knowledge entry) were dropped: every fact they backed is now backed by a source read in full. The StreetEasy entry was a residential building listing tied to a street address, which the privacy rule keeps out of the repo.
@@ -341,14 +342,15 @@ The 6a search-summary sources (Wikipedia, the MTA line map, the CECM and DOT 201
 | `areas` | `id`, `name`, `kind` (`historic-district`, `pedestrian-plaza`, `park`, `event-route`), `segments`, fact fields | Ground and building style, signage (real public place names only) |
 | `zones` | `id`, `name`, `summary`, `segments`, `lockedDecision` | A set of maps (the split plan) |
 | `connections` | `id`, `zones` (exactly 2), `at` (a node both touch), `kind` (`open` = a way through; `wall` = 6c blocks it) | Warp pairs plus spawns, or walls |
-| `maps` | `id`, `zone`, `tiles: [w, h]`, `status` (`proposed`, `built`), `summary`, `segments` | One Tiled map each |
+| `layout` (6c) | `tileX`, `rowsY`, `halfWidth`, `margin`, `stubLength`, `description` | Grid-to-tile scale (`scripts/world-layout.mjs`) |
+| `maps` | `id`, `zone`, `tiles: [w, h]` (must equal the layout's node box plus margin), `status` (`proposed`, `built`), `summary`, `segments` | One Tiled map each |
 | `mapConnections` | `id`, `maps` (2, same zone), `at` (every node both maps touch) | Edge warps between the maps of one zone |
 | `anchors` | `id` (= `pointId`, unique across the dataset), `zone`, `segment`, `side`, `t` (0–1 along the segment), `uses` (`pickup`, `dropoff`, `dispatcher`), optional `landmark` | `deliveryPoint` objects; the Dispatcher's spot |
 | `landmarks` | `id`, `zone`, `kind`, `fictional: true` (required), `placeholder` | Fictional storefronts (fiction boundary, section 1 #5) |
 
 Fact fields: `sources`, `confidence` (`high`, `medium`, `low`) and `status` (`verified`, `corrected` = 6a had it wrong and it was fixed, `unverified`).
 
-**Validation.** Every problem is reported, not just the first, and any error fails the run (exit 1). Checks: unique kebab-case ids; every fact has a known source, a confidence and a status, and `verified`/`corrected` need a source read in full; segments join nodes on their own street, along the grid for `ns`/`ew` streets; LION ids are 7 digits; stub streets have no segments and every other street has one; stations have entrances and the segment they're over; areas name known segments; a segment is in at most one zone, and a zone segment can't be `unmapped`; connections join two zones that both touch the node, at most one per zone pair and node; every zone is reachable through **open** connections; every zone segment is in exactly one map of its zone; maps are at most 96 tiles on a side; maps of one zone that share a node list it in a map connection, and every map is reachable within its zone; exactly one Dispatcher anchor; landmarks are `fictional: true` and used at one anchor at most. Warnings (no failure): a segment in no zone without an `unmapped` reason, zones sharing a node with neither an open nor a wall connection, zones or maps with no pickup/dropoff anchor, unused landmarks, uncited sources. It also lists every fact that isn't both verified and high confidence.
+**Validation.** Every problem is reported, not just the first, and any error fails the run (exit 1). Checks: unique kebab-case ids; every fact has a known source, a confidence and a status, and `verified`/`corrected` need a source read in full; segments join nodes on their own street, along the grid for `ns`/`ew` streets; LION ids are 7 digits; stub streets have no segments and every other street has one; stations have entrances and the segment they're over; areas name known segments; a segment is in at most one zone, and a zone segment can't be `unmapped`; connections join two zones that both touch the node, at most one per zone pair and node; every zone is reachable through **open** connections; every zone segment is in exactly one map of its zone; maps are at most 64 tiles on a side (96 before 6c) and their `tiles` match the layout; the layout is well-formed, names known streets and covers every node's y; maps of one zone that share a node list it in a map connection, and every map is reachable within its zone; exactly one Dispatcher anchor; landmarks are `fictional: true` and used at one anchor at most. Warnings (no failure): a segment in no zone without an `unmapped` reason, zones sharing a node with neither an open nor a wall connection, zones or maps with no pickup/dropoff anchor, unused landmarks, uncited sources. It also lists every fact that isn't both verified and high confidence.
 
 **Verification of 6a's 25 facts (6b, against LION 26C and the sources above).** All 25 checked; none left unverified.
 
@@ -376,38 +378,48 @@ Fact fields: `sources`, `confidence` (`high`, `medium`, `low`) and `status` (`ve
 
 **Current state (6b).** 30 streets (6 of them stubs: Northern Blvd and the five that meet Roosevelt from the south), 74 nodes, 120 segments (106 in zones, 14 `unmapped`), the elevated 7 and 3 stations (74 St-Broadway / Jackson Hts-Roosevelt Av, 82 St-Jackson Hts, 90 St-Elmhurst Av: every 7 station inside the bounds), 6 areas, 4 zones, 23 zone connections (8 open, 15 wall), 11 proposed maps with 9 map connections, 25 anchors (24 delivery, 1 Dispatcher), 11 fictional landmarks, 11 sources. `validate:world`: 0 errors, 0 warnings. 12 facts are verified but medium confidence: the ten 34th Ave segments (LION codes them as a one-way street, while DOT lists a "34th Avenue Plaza" from 69th to 94th St) and two areas (34th Avenue Plaza; the Pride route's west end, below).
 
+**Session 6c changes (data).** The owner made three decisions for 6c; the dataset records them:
+
+1. **Scale:** about 8 tiles per short block (6b planned 16), with fewer, smaller maps of at most about 64 tiles a side. The `layout` block holds the scale and the validator checks every map's size against it (below).
+2. **34th Avenue as a paseo:** all eleven 34th Ave segments (77th–88th St) are `use: plaza`, drawn as a car-free pedestrian street. Sources: NYC DOT's 34th Avenue Open Street page (nyc.gov/34ave: DOT is making 34th Ave from 69th to 96th St the city's first permanent Open Street) and DOT's Current Projects 2025 page (the 2022–2025 work made it "a pedestrian and cyclist priority corridor" with shared streets, vehicle diverters and plaza blocks). DOT's own name is "34th Avenue Open Street"; "Paseo Park" is the name used by the Alliance for Paseo Park, which DOT's page mentions. **LION 26C still lists most of these blocks as a vehicular one-way street**, so the nine blocks that changed from `road` are `corrected` with medium confidence, and their notes say so. The area `area-34th-avenue-plaza` keeps its id, is renamed "34th Avenue Open Street (Paseo Park)" and is now high confidence (DOT's polygon and program page agree on the extent).
+3. **Cross streets as connectors:** the cross streets between 37th Ave and Roosevelt Ave at 78th–88th and 90th St (12 segments, LION ids already in the dataset, source `dcp-lion`) are no longer `unmapped`. They join 89th St in zone `ave-37`, each with an **open** connection to `roosevelt-ave` at its Roosevelt Ave node (12 new connections). In game each is a short north–south path from 37th Ave down to Roosevelt Ave that ends in a warp to the Roosevelt Ave map: a delivery shortcut.
+
+Still `unmapped`: `seg-35ave-88-89` (outside the zones) and `seg-89-35ave-37ave` (the north half of the formation street), both 6b's choices.
+
+**Current state (6c).** 30 streets (6 stubs), 74 nodes, 120 segments (118 in zones, 2 `unmapped`), 3 stations, 6 areas, 4 zones, 35 zone connections (20 open, 15 wall), 9 maps with 5 map connections, 25 anchors (24 delivery, 1 Dispatcher), 11 fictional landmarks, 13 sources. `validate:world`: 0 errors, 0 warnings. 11 facts are verified or corrected but medium confidence: ten 34th Ave segments (DOT vs LION, above) and the Pride route's west end.
+
 **Zones (6b; extents Claude's proposal within the owner's four zones).**
 
 | Zone | Extent | Sources |
 |------|--------|---------|
 | `diversity-plaza-74th` | 73rd–77th St from 37th Ave to Roosevelt Ave; all of 37th Rd (73rd–77th St); pedestrian 37th Rd (73rd–74th) and 73rd St (37th Rd–Roosevelt); Roosevelt 73rd–74th St under the el; the station triangle south of Roosevelt (74th St, Broadway, 75th St). | LION, DOT plazas, MTA |
 | `roosevelt-ave` | Roosevelt Ave 74th–90th St under the elevated 7, with the mouths of Baxter Ave, Forley St, Elbertson St, Britton Ave and Case St from the south; 82 St and 90 St stations. | LION, MTA |
-| `ave-37` | 37th Ave 73rd–90th St, plus 89th St from 37th Ave to Roosevelt (parade formation street and a link to Roosevelt). Pride route: 37th Ave from 89th St west to 75th St (2026 DOT closures); the NYPD 2023 advisory lists 79th–89th St but disperses at 75th St, so the west end is medium confidence. | LION, NYPD, CBS/DOT |
-| `historic-district` | 77th–88th St between 37th Ave and 34th Ave (35th and 34th Ave included), plus Travers Park's frontage (34th Ave 77th–78th St) and the 78th Street Plaza to Northern Blvd. | LPC, LION, Parks, DOT plazas |
+| `ave-37` | 37th Ave 73rd–90th St, plus the cross streets from 37th Ave down to Roosevelt Ave at 78th–90th St (6c; 89th St, the parade formation street, since 6b). Pride route: 37th Ave from 89th St west to 75th St (2026 DOT closures); the NYPD 2023 advisory lists 79th–89th St but disperses at 75th St, so the west end is medium confidence. | LION, NYPD, CBS/DOT |
+| `historic-district` | 77th–88th St between 37th Ave and 34th Ave (35th and 34th Ave included), plus Travers Park's frontage (34th Ave 77th–78th St) and the 78th Street Plaza to Northern Blvd. | LPC, LION, Parks, DOT plazas, DOT 34th Ave |
 
-The LPC boundary (LP-01831, designated 1993-10-19) is recorded as `area-jh-historic-district`: segments with at least half their length inside the polygon. It also covers the north side of Roosevelt Ave around 79th–85th St and, under half of each street, parts of the blocks north of 34th Ave at 81st–82nd St. The cross streets between 37th Ave and Roosevelt (78th–88th and 90th St) are `unmapped` for now (Claude's choice): each would make a zone seam, and 6c can promote some of them to links. 89th St between 35th and 37th Ave (the north half of the formation street) is `unmapped` too, to keep the `ave-37` maps short. Travers Park is just outside the LPC polygon; it is in the `historic-district` zone as an adjacent real public place (Claude's choice).
+The LPC boundary (LP-01831, designated 1993-10-19) is recorded as `area-jh-historic-district`: segments with at least half their length inside the polygon. It also covers the north side of Roosevelt Ave around 79th–85th St and, under half of each street, parts of the blocks north of 34th Ave at 81st–82nd St. Travers Park is just outside the LPC polygon; it is in the `historic-district` zone as an adjacent real public place (6b, Claude's choice).
 
-**Zone connections (proposed).** Open: Diversity Plaza ↔ Roosevelt at 74th and 77th St; Diversity Plaza ↔ 37th Ave at 74th and 75th St; 37th Ave ↔ Roosevelt at 89th St; 37th Ave ↔ Historic District at 78th, 82nd and 86th St. Every other shared node is a wall (15).
+**Zone connections.** Open (20): Diversity Plaza ↔ Roosevelt at 74th and 77th St; Diversity Plaza ↔ 37th Ave at 74th and 75th St; 37th Ave ↔ Roosevelt at every cross street from 78th to 90th St (13; 89th St since 6b, the rest 6c); 37th Ave ↔ Historic District at 78th, 82nd and 86th St. Every other shared node is a wall (15).
 
-**Map split plan for 6c (proposed).** Scale: 16 tiles per east–west block (about 80 m, so roughly 5 m a tile, one screen width per block); 24 tiles per long north–south block (220–235 m, compressed about 2×); 8 tiles for the short 37th Rd to Roosevelt block; 12–14 tiles for a street corridor (storefronts, sidewalks, roadway). Cap: 96 tiles on the long side (6 screens), enforced by the validator.
+**Layout (6c, Claude's choices within the owner's 8-tiles-per-short-block scale).** x: 8 tiles per numbered street (one short east–west block, about 80 m, so roughly 10 m a tile). y: 8 tiles per short north–south block (37th Ave → 37th Rd → Roosevelt Ave), 12 per long block (37th Ave → 35th Ave → 34th Ave → Northern Blvd, and Roosevelt Ave → Broadway at 75th St), so 37th Ave to Roosevelt Ave is 16 tiles. Fractional grid points (Broadway, the streets meeting Roosevelt from the south) round to the nearest tile. Street corridors, sidewalks included: 4 tiles wide by default, 6 for 37th Ave and the 34th Avenue paseo, 8 for Roosevelt Ave under the el. Every map is its outermost nodes plus an 8-tile margin, which leaves room for link stubs.
 
-| Map id | Zone | Covers | Tiles (w × h) | Joins (same zone) |
-|--------|------|--------|---------------|-------------------|
-| `diversity-plaza-74th` | diversity-plaza-74th | 73rd–77th St, 37th Ave to the station triangle | 72 × 56 | — |
-| `roosevelt-ave` | roosevelt-ave | Roosevelt 74th–79th St | 80 × 14 | `roosevelt-ave-79-84` at 79th St |
-| `roosevelt-ave-79-84` | roosevelt-ave | Roosevelt 79th–84th St, 82 St station | 80 × 14 | both neighbours, at 79th and 84th St |
-| `roosevelt-ave-84-90` | roosevelt-ave | Roosevelt 84th–90th St, 90 St station | 96 × 14 | `roosevelt-ave-79-84` at 84th St |
-| `ave-37` | ave-37 | 37th Ave 73rd–79th St | 96 × 14 | `ave-37-79-84` at 79th St |
-| `ave-37-79-84` | ave-37 | 37th Ave 79th–84th St | 80 × 14 | both neighbours, at 79th and 84th St |
-| `ave-37-84-90` | ave-37 | 37th Ave 84th–90th St, 89th St down to Roosevelt | 96 × 40 | `ave-37-79-84` at 84th St |
-| `historic-district` | historic-district | 77th–82nd St, 35th Ave (incl.) to 37th Ave | 80 × 40 | `-82-88` and `-north-82-88` at 82nd St / 35th Ave; `-north` along 35th Ave (77th–81st St) |
-| `historic-district-82-88` | historic-district | 82nd–88th St, 35th Ave (incl.) to 37th Ave | 96 × 40 | `historic-district` at 82nd St / 35th Ave; `-north-82-88` along 35th Ave (82nd–88th St) |
-| `historic-district-north` | historic-district | 77th–82nd St, 34th to 35th Ave, Travers Park, 78th Street Plaza | 80 × 64 | `historic-district` along 35th Ave; `-north-82-88` at 82nd St / 34th Ave |
-| `historic-district-north-82-88` | historic-district | 82nd–88th St, 34th to 35th Ave | 96 × 40 | `historic-district-82-88` along 35th Ave; `-north` at 82nd St / 34th Ave; `historic-district` at the 82nd St / 35th Ave corner |
+**Map split (6c).** Nine maps, all within 64 tiles a side; long avenues take three maps each. Map connections join maps of one zone at shared nodes; zone connections (open ones) join maps of different zones.
 
-Map ids `roosevelt-ave` and `diversity-plaza-74th` keep the session 4 stub ids, so string IDs and the warp registry keep working. Zone connections land in whichever map of each zone touches the node. The full segment lists per map are in the dataset.
+| Map id | Zone | Covers | Tiles (w × h) | Joins |
+|--------|------|--------|---------------|-------|
+| `diversity-plaza-74th` | diversity-plaza-74th | 73rd–77th St, 37th Ave to the station triangle | 48 × 44 | `roosevelt-ave` at 74th and 77th St; `ave-37` at 74th and 75th St |
+| `roosevelt-ave` | roosevelt-ave | Roosevelt 74th–79th St, the Dispatcher | 56 × 16 | `roosevelt-ave-79-84` at 79th St; Diversity Plaza at 74th and 77th St; `ave-37` at 78th St; `ave-37-79-84` at 79th St |
+| `roosevelt-ave-79-84` | roosevelt-ave | Roosevelt 79th–84th St, 82 St station, Baxter Ave mouth | 56 × 16 | both neighbours at 79th and 84th St; `ave-37-79-84` at 80th–83rd St; `ave-37-84-90` at 84th St |
+| `roosevelt-ave-84-90` | roosevelt-ave | Roosevelt 84th–90th St, 90 St station, four street mouths | 64 × 16 | `roosevelt-ave-79-84` at 84th St; `ave-37-84-90` at 85th–90th St |
+| `ave-37` | ave-37 | 37th Ave 73rd–79th St, 78th St connector | 64 × 32 | `ave-37-79-84` at 79th St; Diversity Plaza at 74th and 75th St; `historic-district` at 78th St; `roosevelt-ave` at 78th St |
+| `ave-37-79-84` | ave-37 | 37th Ave 79th–84th St, 79th–83rd St connectors | 56 × 32 | both neighbours at 79th and 84th St; `historic-district-82-88` at 82nd St; Roosevelt maps at 79th–83rd St |
+| `ave-37-84-90` | ave-37 | 37th Ave 84th–90th St, 84th–90th St connectors | 64 × 32 | `ave-37-79-84` at 84th St; `historic-district-82-88` at 86th St; Roosevelt maps at 84th–90th St |
+| `historic-district` | historic-district | 77th–82nd St, 37th Ave to 34th Ave (35th Ave and the paseo), Travers Park frontage, 78th Street Plaza | 56 × 52 | `historic-district-82-88` at 82nd St / 35th Ave and 82nd St / 34th Ave; `ave-37` at 78th St |
+| `historic-district-82-88` | historic-district | 82nd–88th St, 37th Ave to 34th Ave (35th Ave and the paseo) | 64 × 40 | `historic-district` at 82nd St (35th and 34th Ave); `ave-37-79-84` at 82nd St; `ave-37-84-90` at 86th St |
 
-**Anchors and landmarks (proposed).** 24 delivery anchors, at least two in every map, and the Dispatcher's (`rav-dispatch`, Roosevelt 74th–75th St, north side, by the 74 St station). 11 fictional landmark slots (shops, food stalls, service counters, letters A–K), no real businesses. Historic District anchors sit on plain block faces with no building names; residential blocks stay generic.
+Changes from 6b's 11-map plan: the Historic District's four maps become two (the 35th Ave seam is gone; `historic-district-north` and `historic-district-north-82-88` are retired ids), and each avenue map gets smaller. Map ids `roosevelt-ave` and `diversity-plaza-74th` keep the session 4 stub ids, so string IDs and the warp registry keep working. Where a zone connection's node lies on two maps of one zone (79th and 84th St on Roosevelt Ave), it lands in the first of them in the dataset's map order (Claude's choice). The full segment lists per map are in the dataset.
+
+**Anchors and landmarks (6b).** 24 delivery anchors, at least two in every map, and the Dispatcher's (`rav-dispatch`, Roosevelt 74th–75th St, north side, by the 74 St station). 11 fictional landmark slots (shops, food stalls, service counters, letters A–K), no real businesses. Historic District anchors sit on plain block faces with no building names; residential blocks stay generic.
 
 ---
 

@@ -5,6 +5,7 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { layoutProblems, mapBox } from './world-layout.mjs';
 
 const ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const ORIENTATIONS = ['ns', 'ew', 'diagonal'];
@@ -18,8 +19,8 @@ const CONNECTION_KINDS = ['open', 'wall'];
 const MAP_STATUS = ['proposed', 'built'];
 const ANCHOR_USES = ['pickup', 'dropoff', 'dispatcher'];
 const SIDES = { ns: ['east', 'west'], ew: ['north', 'south'], diagonal: ['north', 'south'] };
-// Longest side of one map, in 16x16 tiles (DESIGN.md 2.14, map split plan).
-export const MAX_MAP_SIDE = 96;
+// Longest side of one map, in 16x16 tiles (DESIGN.md 2.14, map split plan; 64 since session 6c).
+export const MAX_MAP_SIDE = 64;
 
 /**
  * Checks one parsed dataset. Returns { errors, warnings, unverified } as string arrays;
@@ -32,7 +33,7 @@ export function validateWorld(data) {
   const err = (m) => errors.push(m);
 
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return { errors: ['dataset must be a JSON object'], warnings, unverified };
-  if (data.schemaVersion !== 2) err(`schemaVersion must be 2 (got ${JSON.stringify(data.schemaVersion)})`);
+  if (data.schemaVersion !== 3) err(`schemaVersion must be 3 (got ${JSON.stringify(data.schemaVersion)})`);
   if (typeof data.id !== 'string' || !ID.test(data.id)) err('id must be a kebab-case string');
 
   // Each collection: an array of objects with unique kebab-case ids. Returns id -> entry.
@@ -104,11 +105,21 @@ export function validateWorld(data) {
     else for (const sid of b[key]) if (!streets.has(sid)) err(`bounds.${key}: unknown street "${sid}"`);
   }
 
+  // Layout (schema 3): how grid positions become tiles. Every node must fall inside rowsY.
+  const layoutErrors = layoutProblems(data.layout);
+  for (const e of layoutErrors) err(e);
+  const layoutOk = layoutErrors.length === 0;
+  if (layoutOk) for (const sid of Object.keys(data.layout.halfWidth)) if (sid !== 'default' && !streets.has(sid)) err(`layout.halfWidth: unknown street "${sid}"`);
+
   for (const n of nodes.values()) {
     if (!Array.isArray(n.streets) || n.streets.length < 2) err(`node "${n.id}": needs at least two streets`);
     else for (const sid of n.streets) if (!streets.has(sid)) err(`node "${n.id}": unknown street "${sid}"`);
     if (!Array.isArray(n.grid) || n.grid.length !== 2 || !n.grid.every(Number.isFinite)) err(`node "${n.id}": grid must be [x, y] numbers`);
     if (n.lion !== undefined && !/^\d{7}$/.test(n.lion)) err(`node "${n.id}": lion must be a 7-digit LION node id`);
+    if (layoutOk && Array.isArray(n.grid)) {
+      const rows = data.layout.rowsY;
+      if (!(n.grid[1] >= rows[0][0] && n.grid[1] <= rows.at(-1)[0])) err(`node "${n.id}": grid y ${n.grid[1]} is outside layout.rowsY`);
+    }
   }
 
   const streetsWithSegments = new Set();
@@ -249,6 +260,11 @@ export function validateWorld(data) {
         mapOf.set(sid, m.id);
       }
       mapNodes.set(m.id, nodesOf(m.segments));
+      // The tile size follows from the layout: the node box plus the margin (scripts/world-layout.mjs).
+      if (layoutOk && Array.isArray(m.tiles) && m.segments.every((sid) => segments.has(sid) && nodes.has(segments.get(sid).from) && nodes.has(segments.get(sid).to))) {
+        const box = mapBox(data.layout, m, segments, nodes);
+        if (m.tiles[0] !== box.width || m.tiles[1] !== box.height) err(`map "${m.id}": tiles ${m.tiles.join('x')} don't match the layout (${box.width}x${box.height})`);
+      }
     }
     for (const [sid, zid] of owner) if (!mapOf.has(sid)) err(`segment "${sid}" (zone "${zid}") is in none of the zone's maps`);
     const mapLinks = new Map([...maps.keys()].map((id) => [id, new Set()]));
