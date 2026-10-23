@@ -1,10 +1,12 @@
 // Desktop behaviour regression suite. A-G: sessions 1-2 (45 checks). H-M: session 3
 // (strings, font, tileset export, dialogue, NPC targeting/collision, depth sorting).
 // N-P: session 4 (Spleen font, "above" tile layer, map registry, warps, fades, zones).
-// Q: session 5 (delivery orders: data checks, state machine, end to end across warps, order ticket).
-// S: session 6c (generated world maps: every map reachable from the start, every warp pair round-trips,
-// every delivery point reachable and facing-accessible). Since 6c every route on the world maps is
-// derived from map data (BFS over the collision grid), not hard-coded; A-O still run on test-map.
+// Q: session 5 (delivery orders: data checks, state machine, end to end, order ticket).
+// S: the generated world map (6c; one continuous map since 6d): every walkable tile and delivery point
+// reachable from the start, every delivery point facing-accessible. T-V: session 6d (8-way movement at
+// 2 px a step, diagonal speed and wall sliding, the thumbstick, the minimap, edge arrow, zone name cards,
+// street signs, the intersection ticket). Routes on the world map are derived from map data (8-way BFS
+// over the collision grid) and walked with real key events; A-O run on test-map.
 // Deterministic: pauses Phaser's rAF loop and advances frames manually at exactly 60 fps via
 // game.step(time, delta), so results don't depend on the browser pane being visible.
 // Run on the dev server (needs the DEV-only window.game hook); see tests/browser/README.md.
@@ -33,7 +35,7 @@ try {
   check('A7 world bounds = map', [s.physics.world.bounds.width, s.physics.world.bounds.height], [480, 320]);
   check('A8 colliding tiles', obstacles.layer.data.flat().filter((t) => t.collides).length, 194);
   check('A9 feet body size/offset', [s.player.body.width, s.player.body.height, s.player.body.offset.x, s.player.body.offset.y], [10, 8, 3, 16]);
-  check('A10 texture sizes tiles/player/emote', [tex('tiles'), tex('player'), tex('emote')], [[64, 32], [48, 96], [10, 10]]);
+  check('A10 texture sizes tiles/player/emote', [tex('tiles'), tex('player'), tex('emote')], [[64, 128], [48, 96], [10, 10]]);
   check('A11 walk anims frames', ['down', 'left', 'right', 'up'].map((d) => { const a = g.anims.get(`player-walk-${d}`); return [a.frames.map((f) => f.frame.name), a.frameRate, a.repeat]; }),
     [[[1, 0, 2, 0], 8, -1], [[4, 3, 5, 3], 8, -1], [[7, 6, 8, 6], 8, -1], [[10, 9, 11, 9], 8, -1]]);
   check('A12 camera roundPixels + follows player', [s.cameras.main.roundPixels, s.cameras.main._follow === s.player], [true, true]);
@@ -46,12 +48,13 @@ try {
   run(1000); ev('keyup', 'ArrowUp'); run(100);
   check('B3 blocked by fountain at y=216', s.player.y, 216);
   let x0 = s.player.x; hold('KeyD', 500);
-  check('B4 speed: D for 30 frames = 30px', Math.round(s.player.x - x0), 30);
+  check('B4 speed: D for 30 frames = 60px (2 px a step since 6d)', Math.round(s.player.x - x0), 60);
   check('B5 whole-pixel position after move', Math.abs(s.player.x - Math.round(s.player.x)) < 1e-6, true);
   check('B6 idle stand frame facing right', [s.player.frame.name, s.player.anims.isPlaying], [6, false]);
-  ev('keydown', 'ArrowLeft'); run(150); ev('keydown', 'ArrowDown'); run(50);
-  const both = s.controls.direction(); ev('keyup', 'ArrowDown'); run(50); const afterDown = s.controls.direction(); ev('keyup', 'ArrowLeft'); run(100);
-  check('B7 last-pressed wins / falls back', [both, afterDown], ['down', 'left']);
+  ev('keydown', 'ArrowLeft'); run(150); ev('keydown', 'ArrowRight'); run(50);
+  const same = s.controls.direction(); ev('keyup', 'ArrowRight'); run(50); const afterRight = s.controls.direction();
+  ev('keydown', 'ArrowDown'); run(50); const both = s.controls.direction(); ev('keyup', 'ArrowDown'); ev('keyup', 'ArrowLeft'); run(100);
+  check('B7 same axis: last-pressed wins / falls back; two axes: a diagonal (6d)', [same, afterRight, both], ['right', 'left', 'down-left']);
   at(232, 268); ev('keydown', 'ArrowRight'); const seq = []; for (let i = 0; i < 40; i++) { run(FRAME); seq.push(s.player.frame.name); } ev('keyup', 'ArrowRight'); run(100);
   R['B8 walk-right frame per step, 40 steps (parity fingerprint)'] = seq.join(',');
 
@@ -61,7 +64,7 @@ try {
   ev('keydown', 'KeyA', { metaKey: true }); run(300);
   check('C1 Cmd+A ignored (no stuck walk)', [s.controls.direction(), s.player.x - x0], [null, 0]);
   ev('keydown', 'KeyA'); run(300); ev('keyup', 'KeyA'); run(100);
-  check('C2 real A after Cmd+A walks 18px then releases', [Math.round(x0 - s.player.x), s.controls.direction()], [18, null]);
+  check('C2 real A after Cmd+A walks 36px then releases', [Math.round(x0 - s.player.x), s.controls.direction()], [36, null]);
   run(300);
   check('C3 animationstop fired once (not per idle frame)', stops, 1);
   s.player.off('animationstop', onStop);
@@ -82,7 +85,7 @@ try {
   at(104, 188); check('D3 alley: walk west to border x=21', hold('ArrowLeft', 1600)[0], 21);
   at(88, 44); check('D4 north wall y=40', hold('ArrowUp', 400)[1], 40);
   at(104, 60); check('D5 street tree from left x=123', hold('ArrowRight', 600)[0], 123);
-  at(392, 248); check('D6 1-tile corridor open going up (y=188)', hold('ArrowUp', 1000)[1], 188);
+  at(392, 248); check('D6 1-tile corridor open going up (y=188)', hold('ArrowUp', 500)[1], 188);
 
   // E. Camera clamps to map bounds
   at(24, 40); check('E1 camera clamps top-left', [s.cameras.main.scrollX, s.cameras.main.scrollY], [0, 0]);
@@ -165,7 +168,7 @@ try {
   run(200);
   check('I9 the closing press does not reopen or emote', [s.talking, g.scene.isActive('Dialogue'), s.emote.visible], [false, false, false]);
   ev('keydown', 'ArrowRight'); run(200); ev('keyup', 'ArrowRight'); run(50);
-  check('I10 movement resumes after close', Math.round(s.player.x - lockPos[0]), 12);
+  check('I10 movement resumes after close', Math.round(s.player.x - lockPos[0]), 24);
   // Multi-page with auto-pagination; window moves to the bottom near the map's top edge.
   place(328, 64, 'up'); press();
   const pagesSeen = [D().page]; let presses = 0;
@@ -277,7 +280,7 @@ try {
     return [drawn, covered];
   };
   // Behind: walk west along the north sidewalk to just north of the first street tree's trunk.
-  at(88, 44); const behindEnd = hold('ArrowLeft', 32 * FRAME); const behind = coveredPixels();
+  at(88, 44); const behindEnd = hold('ArrowLeft', 16 * FRAME); const behind = coveredPixels();
   check('O2 walking behind a tree: the canopy covers the player', [behindEnd, behind[0] > 100, behind[1] > 60], [[56, 44], true, true]); R['O2 info: player px drawn / covered'] = behind.join(' / ');
   // In front: walk north up the street until the same trunk stops the player.
   at(56, 100); const frontEnd = hold('ArrowUp', 600); const front = coveredPixels(); run(FRAME); const frontPx = snap();
@@ -291,13 +294,14 @@ try {
   const M = MAPS_MOD; const mapById = (id) => M.MAP_LIST.find((m) => m.id === id);
   const throwsMsg = (f) => { try { f(); return null; } catch (e) { return e.message; } };
   const WORLD = (await import('/src/data/world/jackson-heights.json')).default;
-  const REAL = WORLD.maps.map((m) => m.id); // the generated world maps; test-map is a test-only fixture
-  check('P1 registry: test-map + the 9 world maps, files and display names resolve, every warp link valid, start on a world map',
+  const LAYOUT_MOD = await import('/scripts/world-layout.mjs');
+  const WORLD_MAP = WORLD.maps[0].id; // the one generated map since 6d; test-map is a test-only fixture
+  check('P1 registry: test-map + the one world map, files and display names resolve, every warp link valid, start on the world map',
     [M.MAP_LIST.map((m) => m.id), M.MAP_LIST.map((m) => STR_MOD.t(m.nameId)), throwsMsg(M.validateLinks), [M.START.map.id, M.START.spawn.spawnId]],
-    [['test-map', ...REAL], ['Test Map', 'Diversity Plaza', 'Roosevelt Avenue', 'Roosevelt at 82nd', 'Roosevelt at 87th', '37th Avenue', '37th Ave at 82nd', '37th Ave at 87th', 'Historic District', 'Historic District East'], null, ['roosevelt-ave', 'start']]);
+    [['test-map', WORLD_MAP], ['Test Map', 'Jackson Heights'], null, [WORLD_MAP, 'start']]);
   const gotoMap = (mapId, spawnId = mapById(mapId).spawns[0].spawnId) => { s.scene.restart({ mapId, spawnId }); run(100); };
 
-  // ---- Map data helpers (6c): the collision grid, warps and NPCs of a map, read from its Tiled data ----
+  // ---- Map data helpers: the collision grid of a map, read from its Tiled data (6c), 8-way since 6d ----
   const GRIDS = new Map();
   const grid = (mapId) => {
     if (GRIDS.has(mapId)) return GRIDS.get(mapId);
@@ -305,70 +309,82 @@ try {
     const solid = new Set((ts.tiles ?? []).filter((t) => t.properties?.some((p) => p.name === 'collides' && p.value === true)).map((t) => t.id + ts.firstgid));
     const obs = d.layers.find((l) => l.name === 'obstacles').data;
     const npcTiles = new Set((d.layers.find((l) => l.name === 'npcs')?.objects ?? []).map((o) => `${Math.floor(o.x / 16)},${Math.floor((o.y - 1) / 16)}`));
-    const W = d.width, H = d.height;
+    const W = d.width, H = d.height; const wk = info.walk;
     const inside = (r, tx, ty) => tx * 16 + 8 >= r.x && tx * 16 + 8 < r.x + r.width && ty * 16 + 8 >= r.y && ty * 16 + 8 < r.y + r.height;
     const warpAt = (tx, ty) => info.warps.find((w) => inside(w, tx, ty));
-    const open = (tx, ty) => tx >= 0 && ty >= 0 && tx < W && ty < H && !solid.has(obs[ty * W + tx]) && !npcTiles.has(`${tx},${ty}`);
+    // Open: inside the map's walkable area, not a colliding tile, not an NPC's tile.
+    const open = (tx, ty) => tx >= 0 && ty >= 0 && tx < W && ty < H && inside(wk, tx, ty) && !solid.has(obs[ty * W + tx]) && !npcTiles.has(`${tx},${ty}`);
     const G = { id: mapId, info, W, H, open, warpAt, inside };
     GRIDS.set(mapId, G); return G;
   };
   const tileAt = (x, y) => [Math.floor(x / 16), Math.floor((y - 1) / 16)];
   const STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const KEY_OF = { '1,0': 'ArrowRight', '-1,0': 'ArrowLeft', '0,1': 'ArrowDown', '0,-1': 'ArrowUp' };
+  const STEPS8 = [...STEPS, [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const FACING_OF = { '1,0': 'right', '-1,0': 'left', '0,1': 'down', '0,-1': 'up' };
-  // Breadth-first search over open tiles (4-way, fixed neighbour order, so deterministic). Warp tiles
-  // are never walked through, only entered as the goal. Returns the tile path, start first, or null.
-  const bfs = (G, start, isGoal) => {
+  // Breadth-first search over open tiles, 8-way (fixed neighbour order, so deterministic). A diagonal
+  // step needs both tiles beside it open (no cutting corners). Warp tiles are only entered as the goal.
+  const bfs = (G, start, isGoal, steps = STEPS8) => {
     const key = (t) => t[1] * G.W + t[0]; const prev = new Map([[key(start), null]]); const queue = [start];
     while (queue.length) {
       const cur = queue.shift();
       if (isGoal(cur)) { const path = [cur]; let k = prev.get(key(cur)); while (k !== null) { path.unshift([k % G.W, Math.floor(k / G.W)]); k = prev.get(k); } return path; }
       if (G.warpAt(...cur) && cur !== start) continue;
-      for (const [dx, dy] of STEPS) { const n = [cur[0] + dx, cur[1] + dy]; if (G.open(...n) && !prev.has(key(n))) { prev.set(key(n), key(cur)); queue.push(n); } }
+      for (const [dx, dy] of steps) {
+        const n = [cur[0] + dx, cur[1] + dy];
+        if (!G.open(...n) || prev.has(key(n))) continue;
+        if (dx && dy && !(G.open(cur[0] + dx, cur[1]) && G.open(cur[0], cur[1] + dy))) continue;
+        prev.set(key(n), key(cur)); queue.push(n);
+      }
     }
     return null;
   };
-  // Walks a tile path with real key events: one straight run per key, held exactly 16 frames per tile
-  // (60 px/s = 1 px a frame), so the player ends exactly on each tile centre. Stops at a warp.
-  const walkPath = (path, input = 'key') => {
-    for (let i = 0; i < path.length - 1 && !s.warping;) {
+  // Real key events, held per axis; setKeys() presses and releases only what changes.
+  const held = new Set();
+  const setKeys = (want) => { for (const k of [...held]) if (!want.includes(k)) { ev('keyup', k); held.delete(k); } for (const k of want) if (!held.has(k)) { ev('keydown', k); held.add(k); } };
+  // Walks to a tile centre (feet), closed loop: each frame it holds the keys toward the target, judging
+  // by where the planned step will land (input acts on the next physics step). Diagonal steps move each
+  // axis 1 or 2 px, so it stops within 1 px of the centre. Returns true on arrival.
+  const goTo = ([tx, ty]) => {
+    const X = tx * 16 + 8, Y = ty * 16 + 12; let stuck = 0, last = '';
+    for (let n = 0; n < 4000 && !s.warping; n++) {
+      const v = s.player.body.velocity; const px = s.player.x + v.x / 60, py = s.player.y + v.y / 60;
+      const dx = X - px, dy = Y - py; const want = [];
+      if (dx >= 2) want.push('ArrowRight'); else if (dx <= -2) want.push('ArrowLeft');
+      if (dy >= 2) want.push('ArrowDown'); else if (dy <= -2) want.push('ArrowUp');
+      setKeys(want); run(FRAME);
+      if (!want.length && Math.abs(X - s.player.x) <= 1 && Math.abs(Y - s.player.y) <= 1) return true;
+      const here = `${s.player.x},${s.player.y}`; stuck = here === last ? stuck + 1 : 0; last = here;
+      if (stuck > 30) break;
+    }
+    setKeys([]); run(FRAME); return Math.abs(X - s.player.x) <= 1 && Math.abs(Y - s.player.y) <= 1;
+  };
+  // Walks a tile path waypoint by waypoint (a run of equal steps is one waypoint). Stops at a warp.
+  const walkPath = (path) => {
+    let ok = true;
+    for (let i = 0; i < path.length - 1 && !s.warping && ok;) {
       const d = [path[i + 1][0] - path[i][0], path[i + 1][1] - path[i][1]]; let j = i + 1;
       while (j < path.length - 1 && path[j + 1][0] - path[j][0] === d[0] && path[j + 1][1] - path[j][1] === d[1]) j++;
-      const k = KEY_OF[d.join(',')]; ev('keydown', k); run((j - i) * 16 * FRAME); ev('keyup', k); i = j;
+      ok = goTo(path[j]); i = j;
     }
+    setKeys([]); run(FRAME); return ok;
   };
   const waitArrival = () => { for (let n = 0; n < 120 && s.warping; n++) run(FRAME); run(FRAME); };
-  // Shortest chain of warps between two maps (BFS over the warp graph of the world maps).
-  const mapRoute = (from, to, avoid = []) => {
-    const prev = new Map([[from, null]]); const queue = [from];
-    while (queue.length) {
-      const m = queue.shift(); if (m === to) break;
-      for (const w of mapById(m).warps) if (!prev.has(w.targetMap) && !avoid.includes(w.targetMap)) { prev.set(w.targetMap, { m, w }); queue.push(w.targetMap); }
-    }
-    if (!prev.has(to)) return null;
-    const hops = []; for (let t = to; prev.get(t); t = prev.get(t).m) hops.unshift(prev.get(t).w); return hops;
-  };
-  // Walks from wherever the player is to a tile on another map, through warps, every step pathfound.
-  const travel = (mapId, isGoal, { via } = {}) => {
-    const log = [];
-    for (let hop = 0; s.info.id !== mapId && hop < 12; hop++) {
-      const G = grid(s.info.id); const w = (via && G.info.warps.find(via)) || mapRoute(s.info.id, mapId)[0];
-      const path = bfs(G, tileAt(s.player.x, s.player.y), (t) => G.inside(w, ...t));
-      if (!path) throw new Error(`travel: no path on ${s.info.id} to warp ${w.objectId}`);
-      walkPath(path); waitArrival(); log.push(s.info.id);
-    }
+  // Walks from wherever the player is to a tile on the current map (no warps on the world map), every step pathfound.
+  const travel = (mapId, isGoal) => {
     const G = grid(mapId); const path = bfs(G, tileAt(s.player.x, s.player.y), isGoal);
     if (!path) throw new Error(`travel: no path on ${mapId} from ${tileAt(s.player.x, s.player.y)}`);
-    walkPath(path); return { maps: log, tiles: path.length };
+    const t0 = frames; const ok = walkPath(path); return { tiles: path.length, frames: frames - t0, ok };
   };
-  // The open tile next to a delivery point (or NPC) the player can stand on, and the way to face it.
+  // The open tile next to a delivery point (or NPC) the player can stand on, and the way to face it (orthogonal only).
   const facingSpot = (G, tx, ty, from) => {
     const path = bfs(G, from, (t) => STEPS.some(([dx, dy]) => t[0] + dx === tx && t[1] + dy === ty) && !G.warpAt(...t));
     if (!path) return null;
     const stand = path.at(-1); return { path, stand, facing: FACING_OF[[tx - stand[0], ty - stand[1]].join(',')] };
   };
-  const pointTile = (mapId, pointId) => { const p = mapById(mapId).deliveryPoints.find((q) => q.pointId === pointId); return [p.x / 16, p.y / 16]; };
+  const pointOf = (mapId, pointId) => mapById(mapId).deliveryPoints.find((q) => q.pointId === pointId);
+  const pointTile = (mapId, pointId) => { const p = pointOf(mapId, pointId); return [p.x / 16, p.y / 16]; };
   // A warp's approach: the open tile next to it from which one step enters it (derived from the grid).
+  const KEY_OF = { '1,0': 'ArrowRight', '-1,0': 'ArrowLeft', '0,1': 'ArrowDown', '0,-1': 'ArrowUp' };
   const approachOf = (G, warp) => {
     for (let ty = warp.y / 16; ty < (warp.y + warp.height) / 16; ty++) for (let tx = warp.x / 16; tx < (warp.x + warp.width) / 16; tx++) {
       for (const [dx, dy] of STEPS) { const a = [tx - dx, ty - dy]; if (G.open(...a) && !G.warpAt(...a)) return { tile: a, key: KEY_OF[[dx, dy].join(',')] }; }
@@ -376,11 +392,16 @@ try {
     return null;
   };
   const allWarps = M.MAP_LIST.flatMap((m) => m.warps.map((w) => ({ from: m.id, warp: w })));
-  // Walks onto a warp holding the key and steps until the next map has faded in. onFrame(i, phase) runs after each frame.
+  const stickEl = document.getElementById('stick');
+  const pe = (target, type, x, y, id) => target.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  // The stick is hidden on desktop; the touch class shows it (and reflows the page) while a check uses it.
+  const withStick = (f) => { const had = document.documentElement.classList.contains('touch'); document.documentElement.classList.add('touch'); try { return f(stickEl.getBoundingClientRect()); } finally { if (!had) document.documentElement.classList.remove('touch'); } };
+  // Walks onto a warp holding the key (or the stick) and steps until the next map has faded in. onFrame(i, phase) runs after each frame.
   const walkWarp = (from, warp, { onFrame, keepHeld = false, input = 'key' } = {}) => {
     gotoMap(from); const ap = approachOf(grid(from), warp); const key = ap.key; at(ap.tile[0] * 16 + 8, ap.tile[1] * 16 + 12);
-    const dpadDir = { ArrowRight: [100, 0], ArrowLeft: [-100, 0], ArrowUp: [0, -100], ArrowDown: [0, 100] }[key];
-    if (input === 'dpad') pe(dpadEl, 'pointerdown', ...dpadDir, 41); else ev('keydown', key);
+    const stickDir = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[key];
+    let r = null;
+    if (input === 'stick') { document.documentElement.classList.add('touch'); r = stickEl.getBoundingClientRect(); pe(stickEl, 'pointerdown', r.left + r.width / 2 + stickDir[0] * r.width * 0.4, r.top + r.height / 2 + stickDir[1] * r.height * 0.4, 41); } else ev('keydown', key);
     const trace = [];
     for (let i = 0; i < 240; i++) {
       run(FRAME);
@@ -389,11 +410,9 @@ try {
       onFrame?.(i, phase, trace);
       if (phase === 'done') break;
     }
-    if (!keepHeld) { if (input === 'dpad') pe(window, 'pointerup', ...dpadDir, 41); else ev('keyup', key); run(50); }
+    if (!keepHeld) { if (input === 'stick') { pe(window, 'pointerup', 0, 0, 41); document.documentElement.classList.remove('touch'); } else ev('keyup', key); run(50); }
     return trace;
   };
-  const dpadEl = document.getElementById('dpad');
-  const pe = (target, type, x, y, id) => target.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, bubbles: true, cancelable: true }));
   const landed = () => [s.info.id, s.player.x, s.player.y, s.facing];
   const expectLanding = (warp) => { const d = M.resolveDestination(warp.targetMap, warp.targetSpawn); return [d.map.id, d.spawn.x, d.spawn.y, d.spawn.facing]; };
 
@@ -402,13 +421,9 @@ try {
     const tr = walkWarp(from, warp); firstTrace ??= tr;
     pairResults[`${from}/${warp.objectId}`] = landed(); pairExpected[`${from}/${warp.objectId}`] = expectLanding(warp);
   }
-  const pairedBack = allWarps.every(({ from, warp }) => mapById(warp.targetMap).warps.some((w) => w.targetMap === from));
-  // test-map's exit is one-way (into roosevelt-ave's start): the test fixture can't be reached from play.
-  const pairedReal = allWarps.filter(({ from }) => from !== 'test-map').every(({ from, warp }) => mapById(warp.targetMap).warps.some((w) => w.targetMap === from));
-  check('P2 every warp (approach derived from the collision grid): lands on the target spawn, facing its way; world warps come in pairs',
-    [allWarps.length, allWarps.every(({ from, warp }) => approachOf(grid(from), warp)), pairedReal, pairResults],
-    [2 * (WORLD.connections.filter((c) => c.kind === 'open').length + WORLD.mapConnections.flatMap((mc) => mc.at).length) + 1, true, true, pairExpected]);
-  void pairedBack;
+  check('P2 every warp (approach derived from the collision grid) lands on its target spawn, facing its way: only test-map\'s one-way exit since 6d (no warps on the world map)',
+    [allWarps.map(({ from }) => from), allWarps.every(({ from, warp }) => approachOf(grid(from), warp)), mapById(WORLD_MAP).warps.length, pairResults],
+    [['test-map'], true, 0, pairExpected]);
   const count = (tr, ph) => tr.filter((f) => f.phase === ph).length;
   const outAlphas = firstTrace.filter((f) => f.phase === 'out').map((f) => f.alpha);
   check('P3 fade: ~250 ms out (to black) and ~250 ms in, player still throughout',
@@ -419,7 +434,10 @@ try {
   const lum = () => { const c = rgbAt(snap(), 128, 112); return ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255); };
   let lastOut = null, firstIn = null; walkWarp('test-map', mapById('test-map').warps[0], { onFrame: (i, ph) => { if (ph === 'out') lastOut = lum(); if (ph === 'in' && firstIn === null) firstIn = lum(); } });
   check('P3b screen is black when the maps swap (last old frame black, first new frame near-black)', [lastOut, firstIn !== null && firstIn < 60], [0, true]);
-  check('P3c name card shows the map name after arriving, then goes', [s.children.list.some((o) => o.type === 'BitmapText' && o.text === 'Roosevelt Avenue'), (run(1600), s.children.list.some((o) => o.type === 'BitmapText' && o.text === 'Roosevelt Avenue'))], [true, false]);
+  // On the world map the card names the zone the player is in, once they've been there ZONE_CARD.settleMs (6d).
+  const cardText = () => s.children.list.find((o) => o.type === 'BitmapText' && o.depth > 2e6)?.text ?? null;
+  const cardNow = cardText(); run(400); const cardSettled = cardText(); run(1600);
+  check('P3c name card names the start zone after arriving, then goes', [cardNow, cardSettled, cardText()], [null, 'Roosevelt Avenue', null]);
 
   // P4. Input lock: Action and a new direction during the fade-out and the fade-in do nothing, now or later.
   let lockLog = { dirs: [], emote: false, talking: false };
@@ -433,23 +451,24 @@ try {
   ev('keyup', 'ArrowDown'); run(50); ev('keydown', 'Space'); run(FRAME); ev('keyup', 'Space'); run(FRAME);
   check('P4b a fresh Action after the fade works', s.emote.visible, true); run(600);
 
-  // P5. A key held into the warp (with auto-repeat) or a D-pad held into it doesn't walk on the new map.
+  // P5. A key held into the warp (with auto-repeat) or the thumbstick held into it doesn't walk on the new map.
   const repeatKey = (i) => { if (i % 4 === 0) ev('keydown', 'ArrowRight', { repeat: true }); };
   walkWarp('test-map', mapById('test-map').warps[0], { keepHeld: true, onFrame: repeatKey });
   const kArrive = [s.player.x, s.player.y]; for (let i = 0; i < 30; i++) { repeatKey(i * 4); run(FRAME); }
   const kHeld = [[s.player.x, s.player.y], s.controls.direction(), s.player.anims.isPlaying];
   ev('keyup', 'ArrowRight'); run(50); ev('keydown', 'ArrowRight'); run(200); ev('keyup', 'ArrowRight'); run(50);
-  check('P5 held key + auto-repeat: no walking after the warp until pressed again', [kHeld, s.player.x - kArrive[0]], [[kArrive, null, false], 12]);
-  walkWarp('test-map', mapById('test-map').warps[0], { keepHeld: true, input: 'dpad' });
+  check('P5 held key + auto-repeat: no walking after the warp until pressed again', [kHeld, s.player.x - kArrive[0]], [[kArrive, null, false], 24]);
+  walkWarp('test-map', mapById('test-map').warps[0], { keepHeld: true, input: 'stick' });
   const dArrive = [s.player.x, s.player.y]; run(500);
-  const dHeld = [[s.player.x, s.player.y], dpadEl.dataset.dir ?? null, s.controls.direction()]; // data-dir = D-pad still held
-  pe(window, 'pointerup', 100, 0, 41); run(50); pe(dpadEl, 'pointerdown', 100, 0, 42); run(200); pe(window, 'pointerup', 100, 0, 42); run(50);
-  check('P5b D-pad held through the warp: no walking until pressed again', [dHeld, s.player.x - dArrive[0]], [[dArrive, 'right', null], 12]);
+  const dHeld = [[s.player.x, s.player.y], stickEl.dataset.dir ?? null, s.controls.direction()]; // data-dir = stick still held
+  { const r = stickEl.getBoundingClientRect(); pe(window, 'pointerup', 0, 0, 41); pe(stickEl, 'pointerdown', r.left + r.width * 0.9, r.top + r.height / 2, 42); run(200); pe(window, 'pointerup', 0, 0, 42); run(50); }
+  document.documentElement.classList.remove('touch');
+  check('P5b thumbstick held through the warp: no walking until pressed again', [dHeld, s.player.x - dArrive[0]], [[dArrive, 'right', null], 24]);
 
   // P6. The window loses focus during the fade-out and again during the fade-in.
   const blurAt = { out: 5, in: 5 }; const seen = { out: 0, in: 0 };
-  const p6Warp = mapById('roosevelt-ave').warps[0];
-  walkWarp('roosevelt-ave', p6Warp, { keepHeld: true, onFrame: (i, ph) => {
+  const p6Warp = mapById('test-map').warps[0];
+  walkWarp('test-map', p6Warp, { keepHeld: true, onFrame: (i, ph) => {
     if (ph in seen && ++seen[ph] === blurAt[ph]) { window.dispatchEvent(new Event('blur')); run(100); window.dispatchEvent(new Event('focus')); }
   } });
   const bArrive = landed(); run(400);
@@ -458,13 +477,13 @@ try {
 
   // P7. Broken links: dev throws (at boot and on use), production falls back.
   const warns2 = []; const ow = console.warn; console.warn = (...a) => warns2.push(a.join(' '));
-  const strictMsgs = [throwsMsg(() => M.resolveDestination('no-such-map', 'start', true)), throwsMsg(() => M.resolveDestination('roosevelt-ave', 'no-such-spawn', true))];
-  const fb1 = M.resolveDestination('no-such-map', 'x', false), fb2 = M.resolveDestination('roosevelt-ave', 'no-such-spawn', false);
+  const strictMsgs = [throwsMsg(() => M.resolveDestination('no-such-map', 'start', true)), throwsMsg(() => M.resolveDestination(WORLD_MAP, 'no-such-spawn', true))];
+  const fb1 = M.resolveDestination('no-such-map', 'x', false), fb2 = M.resolveDestination(WORLD_MAP, 'no-such-spawn', false);
   console.warn = ow;
   const tmInfo = mapById('test-map'); tmInfo.warps.push({ objectId: 999, targetMap: 'nope', targetSpawn: 'x', x: 0, y: 0, width: 1, height: 1 }); const bootMsg = throwsMsg(M.validateLinks); tmInfo.warps.pop();
   check('P7 unknown map/spawn: throws in dev, falls back (with a warning) in production',
     [strictMsgs, bootMsg, [fb1.map.id, fb1.spawn.spawnId], [fb2.map.id, fb2.spawn.spawnId], warns2.length],
-    [['Unknown map "no-such-map"', 'Map "roosevelt-ave" has no spawn "no-such-spawn"'], 'Map "test-map", warp object 999: Unknown map "nope"', ['roosevelt-ave', 'start'], ['roosevelt-ave', 'start'], 2]);
+    [['Unknown map "no-such-map"', `Map "${WORLD_MAP}" has no spawn "no-such-spawn"`], 'Map "test-map", warp object 999: Unknown map "nope"', [WORLD_MAP, 'start'], [WORLD_MAP, 'start'], 2]);
 
   // P8. Talk to the NPC in each map.
   const zoneTalk = {};
@@ -474,8 +493,7 @@ try {
     zoneTalk[m.id] = [s.npcs.length, s.talking && g.scene.isActive('Dialogue'), D().pages[0].replace(/\n/g, ' ').includes(name), n0.sprite.frame.name % 4];
     closeDialogue(); zoneTalk[m.id].push(s.talking);
   }
-  // 6c: the Dispatcher moved from test-map to roosevelt-ave; the stub maps' Neighbors D and E are gone with them.
-  check('P8 dialogue works in each map with NPCs (opens, names the NPC, NPC turns, closes)', zoneTalk, { 'test-map': [3, true, true, 0, false], 'roosevelt-ave': [1, true, true, 0, false] });
+  check('P8 dialogue works in each map with NPCs (opens, names the NPC, NPC turns, closes)', zoneTalk, { 'test-map': [3, true, true, 0, false], [WORLD_MAP]: [1, true, true, 0, false] });
   s.state.reset();
 
   // ---- Session 5 ----
@@ -484,21 +502,20 @@ try {
   const NPCS = await import('/src/systems/npcs.ts');
   const ticketShown = () => s.ticketText.visible && s.ticketBox.visible;
   const ticket = () => (ticketShown() ? s.ticketText.text.split('\n') : null);
-  const lastPage = () => D().pages.join(' ').replace(/\n/g, ' ');
   // Opens the window with Action, reads every page, closes it; returns the text shown.
   const talkAll = () => { press(); let text = ''; for (let n = 0; s.talking && n < 30; n++) { if (D().pageComplete() && !text.includes(D().pages[D().page])) text += D().pages[D().page].replace(/\n/g, ' ') + ' | '; press(); } run(100); return text; };
-  s.state.reset(); gotoMap('roosevelt-ave', 'start');
+  // A stop's place name, read straight from the map data and strings: "<street> & <cross>" (6d).
+  const placeOf = (stop) => { const p = pointOf(stop.map, stop.pointId); return `${EN[p.street]} & ${EN[p.cross]}`; };
+  s.state.reset(); gotoMap(WORLD_MAP, 'start');
 
-  // Q1. Order data: 3 orders; the pickup is off the dispatcher's map and the dropoff off the pickup's map,
-  // so each order needs at least one warp per leg; pickup and dropoff in different zones; every map's
-  // delivery points are its anchors (from the world dataset).
-  const dispatcherMap = 'roosevelt-ave';
-  const zoneOf = (mapId) => WORLD.maps.find((m) => m.id === mapId)?.zone;
-  const anchorsOf = (mapId) => { const segs = WORLD.maps.find((m) => m.id === mapId)?.segments ?? []; return WORLD.anchors.filter((a) => segs.includes(a.segment) && !a.uses.includes('dispatcher')).map((a) => a.id).sort(); };
-  check('Q1 orders: 3 loaded, every leg crosses a warp, pickup and dropoff in different zones, the Dispatcher on roosevelt-ave, each map draws its anchors',
-    [ORD.ORDERS.map((o) => o.id), ORD.ORDERS.every((o) => o.pickup.map !== dispatcherMap && o.dropoff.map !== o.pickup.map && zoneOf(o.pickup.map) !== zoneOf(o.dropoff.map)), s.npcs.filter((n) => n.spawn.role === 'dispatcher').map((n) => n.spawn.npcId),
-      M.MAP_LIST.map((m) => m.deliveryPoints.map((p) => p.pointId).sort())],
-    [['order-1', 'order-2', 'order-3'], true, ['dispatcher'], M.MAP_LIST.map((m) => anchorsOf(m.id))]);
+  // Q1. Order data: 3 orders on the world map; pickup and dropoff in different zones (6d: each order crosses
+  // at least one zone, and one uses the northern area); every delivery point is a world-data anchor.
+  const anchorZone = (pointId) => WORLD.anchors.find((a) => a.id === pointId)?.zone;
+  check('Q1 orders: 3 loaded, every order crosses zones, one uses the northern area, the Dispatcher on the world map, the map draws every delivery anchor',
+    [ORD.ORDERS.map((o) => o.id), ORD.ORDERS.every((o) => o.pickup.map === WORLD_MAP && o.dropoff.map === WORLD_MAP && anchorZone(o.pickup.pointId) !== anchorZone(o.dropoff.pointId)),
+      ORD.ORDERS.some((o) => [o.pickup, o.dropoff].some((st) => anchorZone(st.pointId) === 'northern-blvd')), s.npcs.filter((n) => n.spawn.role === 'dispatcher').map((n) => n.spawn.npcId),
+      mapById(WORLD_MAP).deliveryPoints.map((p) => p.pointId).sort()],
+    [['order-1', 'order-2', 'order-3'], true, true, ['dispatcher'], WORLD.anchors.filter((a) => !a.uses.includes('dispatcher')).map((a) => a.id).sort()]);
 
   // Q2. State machine, on a fresh GameState over the real orders.
   const [o1, o2] = ORD.ORDERS; const P = o1.pickup, Dp = o1.dropoff; const other = { map: o2.pickup.map, pointId: o2.pickup.pointId };
@@ -508,7 +525,7 @@ try {
   log.push(k(st.assignNext()), k(st.assignNext()));          // assign, then busy
   log.push(k(st.interact(Dp.map, Dp.pointId)));               // dropoff before pickup
   log.push(k(st.interact(other.map, other.pointId)));         // some other point
-  log.push(k(st.interact(Dp.map, P.pointId)));                // right pointId, wrong map
+  log.push(k(st.interact('test-map', P.pointId)));            // right pointId, wrong map
   log.push(k(st.interact(P.map, P.pointId)), st.active.status, k(st.interact(P.map, P.pointId)));  // pick up, then again
   log.push(k(st.interact(Dp.map, Dp.pointId)), st.active, st.rewardTotal);  // deliver
   for (const o of ORD.ORDERS.slice(1)) { st.assignNext(); st.interact(o.pickup.map, o.pickup.pointId); st.interact(o.dropoff.map, o.dropoff.pointId); }
@@ -546,49 +563,55 @@ try {
   const objLayer = (objects) => ({ layers: [{ name: 'objects', type: 'objectgroup', objects: [{ id: 1, type: 'spawn', point: true, x: 8, y: 8, properties: [{ name: 'spawnId', value: 'a' }, { name: 'facing', value: 'up' }] }, ...objects] }] });
   const dp = (id, extra = {}) => ({ id, name: 'p', type: 'deliveryPoint', x: 0, y: 0, width: 16, height: 16, properties: [{ name: 'pointId', value: 'x' }], ...extra });
   const fakeMap = (props) => ({ getObjectLayer: () => ({ objects: [{ id: 9, point: true, x: 0, y: 0, properties: Object.entries(props).map(([name, value]) => ({ name, value })) }] }) });
-  check('Q3c malformed delivery points and NPC roles throw at load',
+  check('Q3c malformed delivery points, NPC roles, street signs and zone areas throw at load',
     [throwsMsg(() => M.readObjects('fx', objLayer([dp(2, { point: true, width: 0, height: 0 })]))), throwsMsg(() => M.readObjects('fx', objLayer([dp(2, { properties: [] })]))),
-      throwsMsg(() => M.readObjects('fx', objLayer([dp(2), dp(3)]))), throwsMsg(() => NPCS.readNpcSpawns(fakeMap({ npcId: 'q', dialogueId: 'neighbor-a.hello', facing: 'up', role: 'boss' })))],
+      throwsMsg(() => M.readObjects('fx', objLayer([dp(2), dp(3)]))), throwsMsg(() => NPCS.readNpcSpawns(fakeMap({ npcId: 'q', dialogueId: 'neighbor-a.hello', facing: 'up', role: 'boss' }))),
+      throwsMsg(() => M.readObjects('fx', objLayer([dp(2, { properties: [{ name: 'pointId', value: 'x' }, { name: 'street', value: 'street.st-80' }] })]))),
+      throwsMsg(() => M.readExtras('fx', { layers: [{ name: 'labels', type: 'objectgroup', objects: [{ id: 4, name: 's', type: 'streetSign', point: true, x: 0, y: 0, properties: [{ name: 'street', value: 'a' }, { name: 'cross', value: 'b' }, { name: 'align', value: 'up' }] }] }] })),
+      throwsMsg(() => M.readExtras('fx', { layers: [{ name: 'zones', type: 'objectgroup', objects: [{ id: 5, name: 'z', type: 'zone', x: 0, y: 0, width: 16, height: 16, properties: [] }] }] })),
+      throwsMsg(() => M.readExtras('fx', { width: 2, height: 2, properties: [{ name: 'walkX', value: 1 }] }))],
     ['Map "fx", object 2 ("p"): a delivery point must be a rectangle', 'Map "fx", object 2 ("p"): needs string property "pointId"', 'Map "fx", object 3 ("p"): duplicate pointId "x"',
-      'NPC object 9 in layer "npcs": role must be one of dispatcher']);
+      'NPC object 9 in layer "npcs": role must be one of dispatcher', 'Map "fx", object 2 ("p"): needs string property "cross"', 'Map "fx", sign 4 ("s"): align must be one of nw/ne/sw/se',
+      'Map "fx", zone area 5 ("z"): needs string property "zoneId"', 'Map "fx": walkX, walkY, walkWidth and walkHeight must all be int properties']);
 
-  // Q4. End to end in the game, walking every step with real key events along pathfound routes:
-  // start -> Dispatcher -> warps -> pick up -> warps -> deliver. State and ticket survive each warp.
-  const mapName = (id) => STR_MOD.t(mapById(id).nameId);
-  s.state.reset(); gotoMap('roosevelt-ave', 'start');
+  // Q4. End to end in the game, walking every step with real key events along pathfound (8-way) routes:
+  // start -> Dispatcher -> pick up -> deliver, all on the one map. Lines and ticket name intersections.
+  s.state.reset(); gotoMap(WORLD_MAP, 'start');
   const e2e = { before: [ticket(), s.state.active] };
   const disp = s.npcs.find((n) => n.spawn.role === 'dispatcher');
   const dTile = tileAt(disp.spawn.x, disp.spawn.y);
-  let spot = facingSpot(grid('roosevelt-ave'), ...dTile, tileAt(s.player.x, s.player.y));
-  walkPath(spot.path); s.facing = spot.facing;
-  e2e.reachedDispatcher = [tileAt(s.player.x, s.player.y).join(','), s.facing];
+  const walkStart = frames;
+  let spot = facingSpot(grid(WORLD_MAP), ...dTile, tileAt(s.player.x, s.player.y));
+  e2e.walkedToDispatcher = walkPath(spot.path); s.facing = spot.facing;
+  { const [px, py] = tileAt(s.player.x, s.player.y); const v = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[s.facing]; e2e.reachedDispatcher = px + v[0] === dTile[0] && py + v[1] === dTile[1]; }
   e2e.dispatcher = talkAll(); e2e.afterAssign = [ticket(), s.state.active?.order.id, s.state.active?.status];
   e2e.dispatcherAgain = talkAll();
   const goFace = (stop) => {
-    const [tx, ty] = pointTile(stop.map, stop.pointId); let found = null;
-    const r = travel(stop.map, (t) => { const f = STEPS.find(([dx, dy]) => t[0] + dx === tx && t[1] + dy === ty); if (f && !grid(stop.map).warpAt(...t)) found = f; return !!f && !grid(stop.map).warpAt(...t); });
+    const [tx, ty] = pointTile(stop.map, stop.pointId); let found = null; const G = grid(stop.map);
+    const r = travel(stop.map, (t) => { const f = STEPS.find(([dx, dy]) => t[0] + dx === tx && t[1] + dy === ty); if (f && !G.warpAt(...t)) found = f; return !!f && !G.warpAt(...t); });
     s.facing = FACING_OF[found.join(',')]; return r;
   };
   const leg1 = goFace(o1.pickup);
-  e2e.afterLeg1 = [s.info.id, ticket(), s.state.active?.status, leg1.maps.length >= 1];
+  e2e.afterLeg1 = [s.info.id, ticket(), s.state.active?.status, leg1.ok];
   const fp = s.facing; s.facing = { up: 'down', down: 'up', left: 'right', right: 'left' }[fp]; e2e.facingAway = talkAll(); s.facing = fp;
   e2e.pickup = talkAll(); e2e.afterPickup = [ticket(), s.state.active?.status];
   const leg2 = goFace(o1.dropoff);
-  e2e.afterLeg2 = [s.info.id, ticket(), s.state.active?.status, leg2.maps.length >= 1];
+  e2e.afterLeg2 = [s.info.id, ticket(), s.state.active?.status, leg2.ok];
   e2e.deliver = talkAll();
   e2e.after = [ticket(), s.state.active, s.state.completed, s.state.rewardTotal];
-  R['Q4 info: route maps (leg 1 / leg 2)'] = `${leg1.maps.join(' > ')} / ${leg2.maps.join(' > ')}`;
-  check('Q4 end to end on the world maps (routes pathfound): Dispatcher, pick up and deliver across warps; state and ticket survive warps', e2e, {
+  R['Q4 info: Order #1 walk (frames at 60 fps; tiles per leg)'] = `${frames - walkStart} frames = ${((frames - walkStart) / 60).toFixed(1)} s incl. dialogue; legs ${leg1.tiles} / ${leg2.tiles} tiles, ${leg1.frames} / ${leg2.frames} frames walked`;
+  check('Q4 end to end on the world map (routes pathfound, 8-way): Dispatcher, pick up and deliver; lines and ticket name the intersections', e2e, {
     before: [null, null],
-    reachedDispatcher: [[dTile[0], dTile[1] + 1].join(','), 'up'],
-    dispatcher: `I'm the Dispatcher. I hand out delivery orders, one at a time. | Order #1 is ready for pickup at ${mapName(P.map)}. Bring it to ${mapName(Dp.map)}. | `,
-    afterAssign: [['Order #1: not picked up', `Pick up at ${mapName(P.map)}`], 'order-1', 'assigned'],
-    dispatcherAgain: `I'm the Dispatcher. I hand out delivery orders, one at a time. | You still have Order #1 to pick up at ${mapName(P.map)}. | `,
-    afterLeg1: [P.map, ['Order #1: not picked up', `Pick up at ${mapName(P.map)}`], 'assigned', true],
+    walkedToDispatcher: true,
+    reachedDispatcher: true, // standing next to the Dispatcher, facing them
+    dispatcher: `I'm the Dispatcher. I hand out delivery orders, one at a time. | Order #1 is ready for pickup at ${placeOf(P)}. Bring it to ${placeOf(Dp)}. | `,
+    afterAssign: [['Order #1: not picked up', `Pick up: ${placeOf(P)}`], 'order-1', 'assigned'],
+    dispatcherAgain: `I'm the Dispatcher. I hand out delivery orders, one at a time. | You still have Order #1 to pick up at ${placeOf(P)}. | `,
+    afterLeg1: [P.map, ['Order #1: not picked up', `Pick up: ${placeOf(P)}`], 'assigned', true],
     facingAway: '',
-    pickup: `You picked up Order #1. Bring it to ${mapName(Dp.map)}. | `,
-    afterPickup: [['Order #1: picked up', `Deliver to ${mapName(Dp.map)}`], 'picked-up'],
-    afterLeg2: [Dp.map, ['Order #1: picked up', `Deliver to ${mapName(Dp.map)}`], 'picked-up', true],
+    pickup: `You picked up Order #1. Bring it to ${placeOf(Dp)}. | `,
+    afterPickup: [['Order #1: picked up', `Deliver: ${placeOf(Dp)}`], 'picked-up'],
+    afterLeg2: [Dp.map, ['Order #1: picked up', `Deliver: ${placeOf(Dp)}`], 'picked-up', true],
     deliver: 'You delivered Order #1. Nice work! | ',
     after: [null, null, ['order-1'], 10],
   });
@@ -597,92 +620,216 @@ try {
   s.state.assignNext(); placeAt(o2.dropoff); const early = talkAll();
   s.state.reset(); placeAt(o2.dropoff); const noOrder = talkAll();
   check('Q5 dropoff before pickup explains; a point with no active order says nothing here', [early, noOrder, s.state.active],
-    [`Order #2 goes here, but you haven't picked it up yet. It's at ${mapName(o2.pickup.map)}. | `, 'Nothing here. | ', null]);
+    [`Order #2 goes here, but you haven't picked it up yet. It's at ${placeOf(o2.pickup)}. | `, 'Nothing here. | ', null]);
 
-  // Q6. Order ticket: drawn pixel-exact at whole pixels, centred under the name card, over the map; hidden with no order.
-  s.state.reset(); s.state.assignNext(); gotoMap('roosevelt-ave', 'start'); run(1600); run(FRAME);
+  // Q6. Order ticket: drawn pixel-exact at whole pixels, centred at the bottom (6d: the top right is the minimap's), over the map; hidden with no order.
+  s.state.reset(); s.state.assignNext(); gotoMap(WORLD_MAP, 'start'); run(1600); run(FRAME);
   const tPx = snap(); const tLines = ticket(); const tBad = [];
   tLines.forEach((line, row) => [...line].forEach((ch, col) => {
     for (let y = 0; y < 12; y++) for (let x = 0; x < 6; x++) if (rgbAt(tPx, s.ticketText.x + col * 6 + x, s.ticketText.y + row * 12 + y) !== (bit(ch.charCodeAt(0), x, y) ? 0xfffaf0 : 0x2a1f3d)) { tBad.push(ch); return; }
   }));
   const tb = s.ticketBox; const tw = 6 * Math.max(...tLines.map((l) => l.length)) + 6;
-  check('Q6 ticket: whole-pixel box centred at y=24 (under the name card row), pixel-exact text, fixed to the screen, over sprites and canopies, under the name card',
-    [[tb.x, tb.y, tb.width, tb.height], tBad, [tb.scrollFactorX, s.ticketText.scrollFactorX], tb.depth > layerOf('above').depth && tb.depth > s.emote.depth, tb.y >= 4 + 12 + 6, tb.depth < 2e6],
-    [[Math.floor((256 - tw) / 2), 24, tw, 2 * 12 + 6], [], [0, 0], true, true, true]);
-  // Q6c. Near the map's top edge the camera stops scrolling and the player reaches the top of the screen:
-  // walk (pathfound) up into a north link stub, stopping a tile short of its warp; the ticket moves to the bottom.
+  check('Q6 ticket: whole-pixel box centred 4 px from the bottom, pixel-exact text, fixed to the screen, over sprites and canopies, under the name card',
+    [[tb.x, tb.y, tb.width, tb.height], tBad, [tb.scrollFactorX, s.ticketText.scrollFactorX], tb.depth > layerOf('above').depth && tb.depth > s.emote.depth, tb.depth < 2e6],
+    [[Math.floor((256 - tw) / 2), 224 - 4 - 30, tw, 2 * 12 + 6], [], [0, 0], true, true]);
+  // Q6c. Where the camera can stop scrolling (test-map's bottom edge) the player can reach the bottom of the
+  // screen: walk down onto the bottom row under the ticket; the ticket moves to the top, then comes back.
   const sprite = () => { const c = s.cameras.main; return [s.player.x - 8 - c.scrollX, s.player.y - 24 - c.scrollY, 16, 24]; };
   const hits = (a, b) => a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1];
-  const tRect = () => [tb.x, tb.y, tb.width, tb.height];
-  const Gr = grid('roosevelt-ave'); const northWarp = Gr.info.warps.find((w) => w.y === 16 && w.width > w.height);
-  const topTile = [northWarp.x / 16 + 1, northWarp.y / 16 + 1];
-  const upPath = bfs(Gr, tileAt(s.player.x, s.player.y), (t) => t[0] === topTile[0] && t[1] === topTile[1]);
-  const ticketLog = [];
-  for (let i = 0; i < upPath.length - 1; i++) {
-    const d = [upPath[i + 1][0] - upPath[i][0], upPath[i + 1][1] - upPath[i][1]]; const kk = KEY_OF[d.join(',')];
-    ev('keydown', kk); for (let f = 0; f < 16; f++) { run(FRAME); ticketLog.push([tb.y, hits(sprite(), tRect())]); } ev('keyup', kk);
-  }
-  run(50);
-  const atTop = [s.info.id, s.player.y, tb.y, hits(sprite(), tRect())];
-  walkPath([...upPath].reverse()); run(50);
-  check('Q6c ticket moves to the bottom while the player is under it, never covers the player, and comes back',
-    [atTop, ticketLog.every(([, hit]) => !hit), [...new Set(ticketLog.map(([y]) => y))], tb.y], [['roosevelt-ave', topTile[1] * 16 + 12, 224 - 4 - 30, false], true, [24, 190], 24]);
-  s.state.reset(); gotoMap('roosevelt-ave', 'start'); run(FRAME);
+  gotoMap('test-map', 'start'); const Gt = grid('test-map');
+  // (A restart builds a new ticket box: read it after the restart.)
+  const tbT = s.ticketBox; const tRect = () => [tbT.x, tbT.y, tbT.width, tbT.height];
+  const fromTile = [16, Gt.H - 5]; // walks down onto the bottom row, flush against the border wall
+  at(fromTile[0] * 16 + 8, fromTile[1] * 16 + 12); const ticketLog = [];
+  ev('keydown', 'ArrowDown'); for (let f = 0; f < 30; f++) { run(FRAME); ticketLog.push([tbT.y, hits(sprite(), tRect())]); } ev('keyup', 'ArrowDown'); run(50);
+  const atBottom = [s.player.y, tbT.y, hits(sprite(), tRect())];
+  ev('keydown', 'ArrowUp'); run(30 * FRAME); ev('keyup', 'ArrowUp'); run(50);
+  check('Q6c ticket moves to the top while the player is under it, never covers the player, and comes back',
+    [atBottom, ticketLog.every(([, hit]) => !hit), [...new Set(ticketLog.map(([y]) => y))], tbT.y], [[(Gt.H - 1) * 16, 24, false], true, [224 - 4 - 30, 24], 224 - 4 - 30]);
+  s.state.reset(); gotoMap(WORLD_MAP, 'start'); run(FRAME);
   check('Q6b ticket hidden with no active order', [ticketShown(), s.ticketBox.visible, s.ticketText.visible], [false, false, false]);
 
-  // ---- Session 6c: the generated world maps ----
-  // S1. Reachability from the start, over the collision grids (flood fill per map, following warps).
-  const reach = new Map(); // mapId -> Set of reachable tile keys
-  const queueS = [[M.START.map.id, tileAt(M.START.spawn.x, M.START.spawn.y)]]; const warpsSeen = new Set();
-  while (queueS.length) {
-    const [mid, t0] = queueS.shift(); const G = grid(mid); const seen = reach.get(mid) ?? new Set(); reach.set(mid, seen);
-    if (seen.has(`${t0}`)) continue;
-    const q = [t0]; seen.add(`${t0}`);
-    while (q.length) {
-      const t = q.shift(); const w = G.warpAt(...t);
-      if (w) { const key = `${mid}/${w.objectId}`; if (!warpsSeen.has(key)) { warpsSeen.add(key); const dst = M.resolveDestination(w.targetMap, w.targetSpawn, true); queueS.push([dst.map.id, tileAt(dst.spawn.x, dst.spawn.y)]); } continue; }
-      for (const [dx, dy] of STEPS) { const n = [t[0] + dx, t[1] + dy]; if (G.open(...n) && !seen.has(`${n}`)) { seen.add(`${n}`); q.push(n); } }
-    }
-  }
-  const realWarps = allWarps.filter(({ from }) => from !== 'test-map');
-  check('S1 every world map is reachable from the start (pathfinding over the collision grid), every world warp too; test-map is not',
-    [[...reach.keys()].sort(), realWarps.filter(({ from, warp }) => !warpsSeen.has(`${from}/${warp.objectId}`)).map(({ from, warp }) => `${from}/${warp.objectId}`), reach.has('test-map')], [[...REAL].sort(), [], false]);
+  // ---- The world map (6c; one continuous map since 6d) ----
+  const wiData = () => mapById(WORLD_MAP).data;
+  // S1. Reachability from the start: every walkable tile of the walkable area, 8-way flood fill over the collision grid.
+  const GW = grid(WORLD_MAP); const reach = new Set(); const startTile = tileAt(M.START.spawn.x, M.START.spawn.y);
+  { const q = [startTile]; reach.add(`${startTile}`);
+    while (q.length) { const t = q.shift(); for (const [dx, dy] of STEPS) { const n = [t[0] + dx, t[1] + dy]; if (GW.open(...n) && !reach.has(`${n}`)) { reach.add(`${n}`); q.push(n); } } } }
+  // Street tiles: open and not grass (garden-court lawns are walled-in scenery, open only because grass doesn't collide).
+  const TILE_NAMES = (await import('/src/data/tiles.json')).default.tiles; const groundW = wiData().layers.find((l) => l.name === 'ground').data;
+  const openTiles = []; for (let ty = 0; ty < GW.H; ty++) for (let tx = 0; tx < GW.W; tx++) if (GW.open(tx, ty) && TILE_NAMES[groundW[ty * GW.W + tx] - 1] !== 'grass') openTiles.push(`${tx},${ty}`);
+  const unreached = openTiles.filter((t) => !reach.has(t));
+  check('S1 every street tile (road, sidewalk, plaza) of the world map is reachable from the start (no walled-off streets); test-map unreachable from play',
+    [openTiles.length > 10000, unreached, allWarps.some(({ warp }) => warp.targetMap === 'test-map')], [true, [], false]);
+  R['S1 info: walkable tiles'] = openTiles.length;
 
-  // S2. Every warp pair round-trips, walked with real keys: step into the warp from its approach, then walk
-  // (pathfound) from the arrival spawn into the warp back at the same node; land next to the first warp.
-  const roundTrips = {};
-  const nearWarp = (x, y, warp) => Math.hypot(x - (warp.x + warp.width / 2), y - (warp.y + warp.height / 2)) <= 4 * 16;
-  for (const { from, warp } of realWarps) {
-    walkWarp(from, warp); const arrivedAt = s.info.id;
-    // The way back: a warp to `from` whose landing spawn sits by the warp just taken.
-    const G = grid(arrivedAt);
-    const back = G.info.warps.find((w) => { const d = w.targetMap === from && M.resolveDestination(w.targetMap, w.targetSpawn); return d && nearWarp(d.spawn.x, d.spawn.y, warp); });
-    let res = [arrivedAt === warp.targetMap, !!back];
-    if (back) {
-      const path = bfs(G, tileAt(s.player.x, s.player.y), (t) => G.inside(back, ...t));
-      if (path) { walkPath(path); waitArrival(); }
-      res = [arrivedAt === warp.targetMap, !!path, s.info.id === from, nearWarp(s.player.x, s.player.y, warp), !s.warping && !s.controls.isLocked()];
-    }
-    roundTrips[`${from}/${warp.objectId}`] = res.length === 5 && res.every(Boolean) ? 'ok' : res;
-  }
-  for (const kk of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) ev('keyup', kk); run(50);
-  check('S2 every world warp pair round-trips when walked (there and back lands within 4 tiles of the first warp)',
-    Object.entries(roundTrips).filter(([, v]) => v !== 'ok'), []); R['S2 info: warps walked both ways'] = Object.keys(roundTrips).length;
+  // S2. One continuous map: the map spans every node of the dataset (layout boxes), its walkable area keeps the camera off the edges.
+  const boxes = LAYOUT_MOD.mapBoxes(WORLD.layout, WORLD.nodes); const wi = mapById(WORLD_MAP);
+  check('S2 one map covers the whole dataset: size from the layout, walkable area at least half a screen inside every edge, no warps',
+    [[wi.data.width, wi.data.height], [wi.walk.x, wi.walk.y, wi.walk.width, wi.walk.height], wi.walk.x >= 128 && wi.walk.y >= 112 && wi.data.width * 16 - (wi.walk.x + wi.walk.width) >= 128 && wi.data.height * 16 - (wi.walk.y + wi.walk.height) >= 112, wi.warps.length],
+    [[boxes.map.width, boxes.map.height], [(boxes.walk.x0 - boxes.map.x0) * 16, (boxes.walk.y0 - boxes.map.y0) * 16, boxes.walk.width * 16, boxes.walk.height * 16], true, 0]);
 
   // S3. Every delivery point: reachable from the start and facing-accessible (Action from the open tile in
   // front of it opens the delivery line; no order is active, so it's "Nothing here.").
   s.state.reset(); const pointsBad = []; let pointsOk = 0;
-  for (const mid of REAL) for (const p of mapById(mid).deliveryPoints) {
-    const G = grid(mid); const [tx, ty] = [p.x / 16, p.y / 16];
-    const stands = STEPS.map(([dx, dy]) => [tx - dx, ty - dy]).filter((t) => G.open(...t) && !G.warpAt(...t) && reach.get(mid)?.has(`${t}`));
-    if (!stands.length) { pointsBad.push(`${mid}/${p.pointId}: no reachable tile in front`); continue; }
-    gotoMap(mid); const st0 = stands[0]; place(st0[0] * 16 + 8, st0[1] * 16 + 12, FACING_OF[[tx - st0[0], ty - st0[1]].join(',')]);
-    const said = talkAll(); if (said === 'Nothing here. | ') pointsOk++; else pointsBad.push(`${mid}/${p.pointId}: said "${said}"`);
+  for (const p of wi.deliveryPoints) {
+    const [tx, ty] = [p.x / 16, p.y / 16];
+    const stands = STEPS.map(([dx, dy]) => [tx - dx, ty - dy]).filter((t) => GW.open(...t) && reach.has(`${t}`));
+    if (!stands.length) { pointsBad.push(`${p.pointId}: no reachable tile in front`); continue; }
+    const st0 = stands[0]; place(st0[0] * 16 + 8, st0[1] * 16 + 12, FACING_OF[[tx - st0[0], ty - st0[1]].join(',')]);
+    const said = talkAll(); if (said === 'Nothing here. | ') pointsOk++; else pointsBad.push(`${p.pointId}: said "${said}"`);
   }
   check('S3 every delivery point is reachable from the start and facing-accessible', [pointsOk, pointsBad], [WORLD.anchors.filter((a) => !a.uses.includes('dispatcher')).length, []]);
+
+  // ---- Session 6d: movement, thumbstick, wayfinding ----
+  const CONFIG = await import('/src/config.ts'); const TOUCH = await import('/src/systems/touchControls.ts');
+  // Tile coordinates on the world map of a dataset node (layout + the map's top-left corner).
+  const nodeTile = (nid) => { const [x, y] = LAYOUT_MOD.tileOf(WORLD.layout, WORLD.nodes.find((n) => n.id === nid).grid); return [x - boxes.map.x0, y - boxes.map.y0]; };
+  const [C80, R37] = nodeTile('n-80-37ave'); const [, RN] = nodeTile('n-80-northern');
+  const feetAt = (tx, ty) => at(tx * 16 + 8, ty * 16 + 12);
+  // Holds keys for n frames; returns the per-frame positions.
+  const holdKeys = (keys, n) => { for (const k2 of keys) ev('keydown', k2); const tr = []; for (let i = 0; i < n; i++) { run(FRAME); tr.push([s.player.x, s.player.y]); } for (const k2 of keys) ev('keyup', k2); run(FRAME * 2); return tr; };
+  const moved = (from) => [s.player.x - from[0], s.player.y - from[1]];
+
+  // T1. Straight: 120 px/s = 2 px a step, whole pixels, in all four directions (open road, mid-block).
+  gotoMap(WORLD_MAP, 'start'); const straight = {};
+  for (const [key, tile] of [['ArrowRight', [C80 + 3, R37 - 2]], ['ArrowLeft', [C80 + 7, R37 + 1]], ['ArrowUp', [C80 - 1, R37 - 8]], ['ArrowDown', [C80, R37 - 20]]]) {
+    feetAt(...tile); const from = [s.player.x, s.player.y]; const tr = holdKeys([key], 60);
+    straight[key] = [...moved(from), tr.every(([x, y]) => Number.isInteger(x) && Number.isInteger(y))];
+  }
+  check('T1 straight walking: 120 px in 60 frames (2 px a step) in each direction, whole pixels', straight,
+    { ArrowRight: [120, 0, true], ArrowLeft: [-120, 0, true], ArrowUp: [0, -120, true], ArrowDown: [0, 120, true] });
+
+  // T2. Diagonal: each axis moves 1 or 2 px a step, so the speed along the diagonal stays ~2 px a step (Northern Blvd, mid-block).
+  const diag = {};
+  for (const [keys, tile] of [[['ArrowRight', 'ArrowUp'], [C80 + 2, RN + 3]], [['ArrowLeft', 'ArrowDown'], [C80 + 7, RN - 4]], [['ArrowRight', 'ArrowDown'], [C80 + 2, RN - 4]], [['ArrowLeft', 'ArrowUp'], [C80 + 7, RN + 3]]]) {
+    feetAt(...tile); const from = [s.player.x, s.player.y]; const tr = holdKeys(keys, 60);
+    const [dx, dy] = moved(from); const steps = tr.slice(2).map(([x, y], i) => [Math.abs(x - tr[i + 1][0]), Math.abs(y - tr[i + 1][1])]);
+    diag[keys.join('+')] = [Math.abs(dx), Math.abs(dy), Math.abs(Math.hypot(dx, dy) / 120 - 1) <= 0.03, steps.every(([a, b]) => (a === 1 || a === 2) && (b === 1 || b === 2)), tr.every(([x, y]) => Number.isInteger(x) && Number.isInteger(y))];
+  }
+  check('T2 diagonal walking: ~84 px per axis in 60 frames (within 3% of the straight speed), 1-2 px per axis per step, whole pixels', diag,
+    Object.fromEntries(Object.keys(diag).map((key) => [key, [84, 84, true, true, true]])));
+
+  // T3. Wall sliding: a diagonal into a wall keeps moving along it at full speed instead of sticking.
+  feetAt(C80 - 2, R37 - 13); let from = [s.player.x, s.player.y]; holdKeys(['ArrowLeft', 'ArrowUp'], 60); const slideNS = moved(from);
+  feetAt(C80 + 2, RN - 4); from = [s.player.x, s.player.y]; holdKeys(['ArrowRight', 'ArrowUp'], 40); const slideEW = moved(from);
+  check('T3 a diagonal into a wall slides along it at (nearly) full speed: up-left along a west facade, up-right along a north facade',
+    [slideNS[0] >= -4 && slideNS[0] <= 0, slideNS[1] <= -116, slideEW[1] >= -4 && slideEW[1] <= 0, slideEW[0] >= 76], [true, true, true, true]);
+  R['T3 info: slide displacements (60 / 40 frames)'] = `${slideNS} / ${slideEW}`;
+
+  // T4. Keyboard diagonals and facing: two keys on different axes give a diagonal; the sprite reuses a
+  // cardinal frame: it keeps facing one of the diagonal's directions, else faces sideways (Claude's choice).
+  feetAt(C80 + 3, R37 - 2); ev('keydown', 'ArrowUp'); run(100); const upFirst = s.facing; ev('keydown', 'ArrowRight'); run(100);
+  const keepUp = [s.controls.direction(), s.facing]; ev('keyup', 'ArrowUp'); ev('keyup', 'ArrowRight'); run(50);
+  ev('keydown', 'ArrowDown'); ev('keydown', 'ArrowLeft'); run(100); const fresh = [s.controls.direction(), s.facing, s.player.anims.currentAnim?.key]; ev('keyup', 'ArrowDown'); ev('keyup', 'ArrowLeft'); run(50);
+  check('T4 two keys = a diagonal; diagonal facing keeps a matching cardinal, else turns sideways; the walk animation follows the facing',
+    [upFirst, keepUp, fresh], ['up', ['up-right', 'up'], ['down-left', 'left', 'player-walk-left']]);
+
+  // T5. 8-way pathfinding (the grid the checks walk) is shorter than 4-way, and walking it with real keys arrives.
+  gotoMap(WORLD_MAP, 'start'); const q4 = bfs(GW, tileAt(s.player.x, s.player.y), (t) => t[0] === C80 && t[1] === R37, STEPS); const q8 = bfs(GW, tileAt(s.player.x, s.player.y), (t) => t[0] === C80 && t[1] === R37);
+  const arrived8 = walkPath(q8);
+  check('T5 8-way BFS: fewer steps than 4-way, uses diagonals, and the closed-loop walk arrives on the tile', [q8.length < q4.length, q8.some((t, i) => i && t[0] !== q8[i - 1][0] && t[1] !== q8[i - 1][1]), arrived8, tileAt(s.player.x, s.player.y)], [true, true, true, [C80, R37]]);
+
+  // T6. End to end east to west: hold Right from the walkable area's west edge on 37th Ave to its east edge.
+  feetAt(wi.walk.x / 16, R37 - 2); const ewStart = s.player.x; ev('keydown', 'ArrowRight'); let ewFrames = 0, still = 0, lastX = s.player.x, lastMove = 0;
+  while (ewFrames < 5000 && still < 10) { run(FRAME); ewFrames++; if (s.player.x === lastX) still++; else { still = 0; lastMove = ewFrames; } lastX = s.player.x; }
+  ev('keyup', 'ArrowRight'); run(50);
+  const ewSeconds = lastMove / 60; ewFrames = lastMove + 1;
+  check('T6 crossing the whole map east-west takes under 60 s (decision 6)', [s.player.x - ewStart > wi.walk.width - 32, ewSeconds < 60], [true, true]);
+  R['T6 info: end-to-end walk east-west'] = `${s.player.x - ewStart} px in ${ewFrames - 1} frames = ${ewSeconds.toFixed(1)} s`;
+
+  // U1. Thumbstick sectors: eight 45-degree sectors clockwise from up; a deadzone of 25% of the radius.
+  const deg = (a, r = 0.8) => TOUCH.stickDirection(r * Math.sin((a * Math.PI) / 180), -r * Math.cos((a * Math.PI) / 180));
+  check('U1 thumbstick: 8 sectors (boundaries at 22.5 degrees off each direction), deadzone 25% of the radius',
+    [[0, 45, 90, 135, 180, 225, 270, 315].map((a) => deg(a)), [22.4, 22.6, 337.4, 337.6].map((a) => deg(a)), [deg(90, 0.24), deg(90, 0.26), TOUCH.stickDirection(0, 0)]],
+    [CONFIG.DIRECTIONS_8, ['up', 'up-right', 'up-left', 'up'], [null, 'right', null]]);
+
+  // U2. Thumbstick DOM: the knob follows the thumb within its travel, data-dir names the sector, release clears both.
+  const stickLog = withStick((r) => {
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2, rad = r.width / 2; const knob = document.getElementById('stick-knob'); const out = {};
+    gotoMap(WORLD_MAP, 'start'); feetAt(C80 + 3, R37 - 2); const from0 = [s.player.x, s.player.y];
+    pe(stickEl, 'pointerdown', cx + rad * 0.5, cy - rad * 0.5, 61); run(500);
+    out.upRight = [stickEl.dataset.dir, s.controls.direction(), Math.sign(s.player.x - from0[0]), Math.sign(s.player.y - from0[1])];
+    pe(window, 'pointermove', cx + rad * 3, cy, 61); run(FRAME); out.knobClamped = knob.style.transform === `translate(${Math.round(rad * 0.55)}px, 0px)`;
+    pe(window, 'pointermove', cx + rad * 0.1, cy, 61); run(FRAME); out.deadzone = [stickEl.dataset.dir ?? null, s.controls.direction()];
+    pe(window, 'pointerup', cx, cy, 61); run(FRAME); out.released = [stickEl.dataset.dir ?? null, knob.style.transform, s.controls.direction()];
+    return out;
+  });
+  check('U2 thumbstick: knob follows within 55% of the radius, 8-way direction while held, deadzone, released clean', stickLog,
+    { upRight: ['up-right', 'up-right', 1, -1], knobClamped: true, deadzone: [null, null], released: [null, '', null] });
+
+  // V. Wayfinding (6d): minimap, edge arrow, beacon, zone name card, street signs, the intersection ticket.
+  s.state.reset(); gotoMap(WORLD_MAP, 'start'); run(FRAME);
+  const mm = s.minimap; const mmImg = mm.image; const MM = CONFIG.MINIMAP;
+  const mmPx = (x, y) => [Math.min(mm.width - 1, Math.max(0, Math.floor(((x / 16 - mm.ox) * MM.pixelsPer) / MM.tilesPer))), Math.min(mm.height - 1, Math.max(0, Math.floor(((y / 16 - mm.oy) * MM.pixelsPer) / MM.tilesPer)))];
+  const markerPx = (r) => [r.x - (s.minimap.image.x + 1) + 1, r.y - (s.minimap.image.y + 1) + 1];
+  // V1. Position and content: top-right, whole pixels; streets light and blocks dark (sampled at 80th St / 37th Ave and mid-block).
+  const mmTex = g.textures.get(mmImg.texture.key).getSourceImage(); const mmData = mmTex.getContext('2d').getImageData(0, 0, mmTex.width, mmTex.height).data;
+  const mmRgb = ([px, py]) => { const i = ((py + 1) * mmTex.width + px + 1) * 4; return (mmData[i] << 16) | (mmData[i + 1] << 8) | mmData[i + 2]; };
+  const streetPx = mmPx(C80 * 16, R37 * 16 + 8); const blockPx = mmPx((C80 + 5) * 16, (R37 - 13) * 16);
+  check('V1 minimap: top-right corner (4 px margins, 1 px frame), whole pixels, the whole walkable area at 3 px per block; streets light, blocks dark; none on test-map',
+    [[mmImg.x + mmImg.width, mmImg.y], [mmImg.width, mmImg.height], Number.isInteger(mmImg.x) && Number.isInteger(mmImg.y), mmRgb(streetPx) !== 0x2a1f3d, mmRgb(blockPx), (gotoMap('test-map', 'start'), s.minimap)],
+    [[256 - MM.margin, MM.margin], [Math.floor((((wi.walk.x + wi.walk.width) / 16 - 1 + 0.5 - mm.ox) * 3) / 10) + 3, Math.floor((((wi.walk.y + wi.walk.height) / 16 - 1 + 0.5 - mm.oy) * 3) / 10) + 3], true, true, 0x2a1f3d, null]);
+  // V2. The player dot tracks the player (walk a route, compare every frame) and the Dispatcher marker sits on the Dispatcher.
+  s.state.reset(); gotoMap(WORLD_MAP, 'start'); let dotBad = 0, dotFrames = 0;
+  const watchDot = () => { const m2 = s.minimap; const [ex, ey] = mmPx(s.player.x, s.player.y - 1); const [ax, ay] = markerPx(m2.player); dotFrames++; if (ax !== ex || ay !== ey) dotBad++; };
+  for (const tile of [[C80 + 3, R37 - 2], [C80 - 1, RN + 3]]) { const path = bfs(GW, tileAt(s.player.x, s.player.y), (t) => t[0] === tile[0] && t[1] === tile[1]); for (let i = 1; i < path.length; i += 6) { goTo(path[Math.min(i, path.length - 1)]); watchDot(); } }
+  const dsp = s.npcs.find((n) => n.spawn.role === 'dispatcher');
+  check('V2 minimap: the player dot is the player\'s minimap pixel all along a route; the Dispatcher marker is the Dispatcher\'s',
+    [dotBad, dotFrames > 10, JSON.stringify(markerPx(s.minimap.dispatcher)) === JSON.stringify(mmPx(dsp.sprite.x, dsp.sprite.y - 1)), [s.minimap.player.width, s.minimap.player.height]], [0, true, true, [3, 3]]);
+  // V3. The target marker: hidden with no order; on the order's pickup, then its dropoff; it blinks.
+  const tMark = () => s.minimap.target; const blinkSeen = () => { const v = new Set(); for (let i = 0; i < 60; i++) { run(FRAME); v.add(tMark().visible); } return [...v].sort(); };
+  const noOrderMark = blinkSeen();
+  s.state.assignNext(); const pp = pointOf(WORLD_MAP, o1.pickup.pointId); const pickBlink = blinkSeen(); const atPick = markerPx(tMark());
+  s.state.interact(WORLD_MAP, o1.pickup.pointId); run(FRAME); const dpt = pointOf(WORLD_MAP, o1.dropoff.pointId); run(FRAME); const atDrop = markerPx(tMark());
+  check('V3 minimap target marker: hidden with no order, then on the pickup, then on the dropoff; blinks while shown',
+    [noOrderMark, pickBlink, JSON.stringify(atPick) === JSON.stringify(mmPx(pp.x + 8, pp.y + 15)), JSON.stringify(atDrop) === JSON.stringify(mmPx(dpt.x + 8, dpt.y + 15))], [[false], [false, true], true, true]);
+  // V4. No overlaps: the minimap vs the order ticket (every order, both statuses) and vs the player (always mid-screen
+  // on the world map); hidden while the text window is open (which would cover it).
+  const rectOf = (o) => [o.x, o.y, o.width, o.height]; const mmRect = rectOf(s.minimap.image); const ticketHits = [];
+  for (const order of s.state.orders) for (const status of ['assigned', 'picked-up']) { s.state.active = { order, status }; s.refreshTicket(); run(FRAME); if (hits(rectOf(s.ticketBox), mmRect)) ticketHits.push(`${order.id}/${status}`); }
+  let playerHits = 0; for (const tile of [[wi.walk.x / 16, wi.walk.y / 16], [(wi.walk.x + wi.walk.width) / 16 - 1, wi.walk.y / 16], [C80, RN]]) { feetAt(...tile); run(FRAME); if (hits(sprite(), mmRect)) playerHits++; }
+  s.state.reset(); s.refreshTicket(); gotoMap(WORLD_MAP, 'start');
+  { const sp = facingSpot(GW, ...dTile, tileAt(s.player.x, s.player.y)); place(sp.stand[0] * 16 + 8, sp.stand[1] * 16 + 12, sp.facing); }
+  press(); run(100); const hiddenWhileTalking = [s.talking, s.minimap.image.visible, s.minimap.player.visible]; closeDialogue(); run(FRAME);
+  check('V4 minimap never covers the ticket or the player (incl. the walkable area\'s corners); hidden while the text window is open',
+    [ticketHits, playerHits, hiddenWhileTalking, s.minimap.image.visible], [[], 0, [true, false, false], true]);
+  // V5. Edge arrow: shown while the target is off-screen, pointing its way from the screen edge, off the minimap and
+  // ticket; hidden when the target is on screen. Order #1 is active (the Dispatcher talk above assigned it).
+  const arrowCases = {};
+  for (const [label, tile] of [['far east', [C80 + 60, R37 - 2]], ['far north', [C80, RN]], ['south-east', [C80 + 70, R37 + 25]]]) {
+    feetAt(...tile); run(FRAME); const a = s.arrow; const tgt = pointOf(WORLD_MAP, o1.pickup.pointId);
+    const want = TOUCH.stickDirection(tgt.x + 8 - s.player.x, tgt.y + 8 - (s.player.y - 12));
+    const ar = [a.x, a.y, 11, 11]; const edge = a.x <= 4 || a.y <= 4 || a.x >= 256 - 4 - 11 || a.y >= 224 - 4 - 11 || hits([a.x, a.y - 2, 11, 15], mmRect) || hits([a.x, a.y - 2, 11, 15], rectOf(s.ticketBox));
+    arrowCases[label] = [a.visible, CONFIG.DIRECTIONS_8[a.frame.name] === want || null, edge, !hits(ar, mmRect) && !hits(ar, rectOf(s.ticketBox)), Number.isInteger(a.x) && Number.isInteger(a.y)];
+  }
+  { const pt2 = pointOf(WORLD_MAP, o1.pickup.pointId); const f = facingSpot(GW, pt2.x / 16, pt2.y / 16, tileAt(s.player.x, s.player.y)); place(f.stand[0] * 16 + 8, f.stand[1] * 16 + 12, f.facing); run(FRAME); arrowCases.onScreen = [s.arrow.visible, s.beacon.visible, s.beacon.x === pt2.x + 8]; }
+  check('V5 edge arrow: on the screen edge toward the off-screen target (frame = its 8-way direction), never on the minimap or ticket; gone when the target is on screen, where the beacon marks the door',
+    arrowCases, { 'far east': [true, true, true, true, true], 'far north': [true, true, true, true, true], 'south-east': [true, true, true, true, true], onScreen: [false, true, true] });
+  // V6. Zone name card: shown once the player has stayed in a new zone for 300 ms; crossings (no zone) keep the last one.
+  s.state.reset(); gotoMap(WORLD_MAP, 'start'); run(500); run(1600);
+  const zoneCards = [];
+  const visit = (tile, ms) => { feetAt(...tile); for (let i = 0; i < ms / FRAME; i++) { run(FRAME); const c = cardText(); if (c && zoneCards.at(-1) !== c) zoneCards.push(c); } };
+  visit([C80, R37 - 13], 100); visit([C80 + 5, R37 - 2], 600); visit([C80, R37], 600); visit([C80 + 5, RN - 2], 600); visit([C80 + 5, RN], 600);
+  check('V6 zone name card: a quick pass shows nothing, a stay names the zone, a crossing keeps it, the northern area is named',
+    zoneCards, ['37th Avenue', 'Northern Boulevard']);
+  // V7. Street signs: one per intersection of the walkable area, the two street names as written in en.json.
+  const signTexts = s.children.list.filter((o) => o.type === 'BitmapText' && o.depth < 0).map((o) => o.text);
+  const pointName = WORLD.nodes.find((n) => n.id === 'n-80-37ave');
+  check('V7 street signs: one per map sign object, each "<street>\\n<cross>" from the strings (e.g. 80th St / 37th Ave), under every sprite',
+    [signTexts.length, wi.signs.length > 100, signTexts.includes('80th St\n37th Ave'), signTexts.includes('78th St\nNorthern Blvd'), s.children.list.filter((o) => o.type === 'BitmapText' && o.depth < 0).every((o) => o.depth < 0), !!pointName],
+    [wi.signs.length, true, true, true, true, true]);
+  // V8. The order ticket names the destination as an intersection (decision: "Pick up: 74th St & 37th Rd" style).
+  const ticketFor = (status, order) => { s.state.active = { order, status }; s.refreshTicket(); return s.ticketText.text.split('\n'); };
+  check('V8 ticket format: "Pick up: <street> & <cross>", then "Deliver: <street> & <cross>"',
+    [ticketFor('assigned', o1), ticketFor('picked-up', o1), ORD.placeName(o1.pickup)],
+    [['Order #1: not picked up', 'Pick up: 73rd St & 37th Rd'], ['Order #1: picked up', 'Deliver: 77th St & 37th Ave'], '73rd St & 37th Rd']);
+  s.state.reset(); s.refreshTicket();
 } catch (e) {
   R.ERROR = String(e && e.stack || e);
 } finally {
+  for (const k2 of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) ev('keyup', k2);
+  document.documentElement.classList.remove('touch');
   for (let n = 0; s.talking && n < 30; n++) { ev('keydown', 'Space'); run(FRAME); ev('keyup', 'Space'); run(FRAME); }
   s.state?.reset(); s.scene.restart({}); run(100);
   g.loop.wake();

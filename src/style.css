@@ -3,7 +3,8 @@
   --outline: #2a1f3d;
   --pad: #f4e9ff;
   --pad-pressed: #ffc8e0;
-  --dpad-cell: 44px;
+  --pad-base: #ddd0ee;
+  --stick: 132px;
 }
 
 * {
@@ -69,13 +70,13 @@ canvas {
     calc(24px + env(safe-area-inset-left));
 }
 
-/* Landscape: controls float over the letterbox bars beside the game. The D-pad shrinks
-   to fit the bar ((viewport width - game width) / 2, game width = height * 256/224)
-   down to a 32px floor; on 4:3 tablets and foldables the bars are narrower than that,
+/* Landscape: controls float over the letterbox bars beside the game. The thumbstick
+   shrinks to fit the bar ((viewport width - game width) / 2, game width = height * 256/224)
+   down to a 96px floor; on 4:3 tablets and foldables the bars are narrower than that,
    so the controls overlap the edge of the game there. */
 @media (orientation: landscape) {
   :root {
-    --dpad-cell: clamp(32px, calc((100vw - 100vh * 256 / 224) / 6 - 8px), 44px);
+    --stick: clamp(96px, calc((100vw - 100vh * 256 / 224) / 2 - 24px), 132px);
   }
   .touch #touch-controls {
     position: absolute;
@@ -91,49 +92,43 @@ canvas {
   }
 }
 
-#dpad {
-  display: grid;
-  grid-template: repeat(3, var(--dpad-cell)) / repeat(3, var(--dpad-cell));
+/* Thumbstick: a round base with a knob that follows the thumb (src/systems/touchControls.ts
+   moves the knob with a transform and sets data-dir while a direction is held). */
+#stick {
+  position: relative;
+  flex: none;
+  width: var(--stick);
+  height: var(--stick);
+  border-radius: 50%;
+  background: var(--pad-base);
+  border: 3px solid var(--outline);
+  box-shadow: inset 0 0 0 6px var(--pad);
   touch-action: none;
-  /* Four offset shadows draw a chunky outline around the cross silhouette. */
-  filter: drop-shadow(3px 0 0 var(--outline)) drop-shadow(-3px 0 0 var(--outline))
-    drop-shadow(0 3px 0 var(--outline)) drop-shadow(0 -3px 0 var(--outline));
 }
 
-#dpad > div {
+#stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44%;
+  height: 44%;
+  /* Percentage margins resolve against the parent's width, so this centres the knob. */
+  margin: -22% 0 0 -22%;
+  border-radius: 50%;
   background: var(--pad);
+  border: 3px solid var(--outline);
+  box-shadow: 0 3px 0 var(--outline);
+  pointer-events: none;
 }
 
-#dpad .up {
-  grid-area: 1 / 2;
-  border-radius: 6px 6px 0 0;
-}
-#dpad .left {
-  grid-area: 2 / 1;
-  border-radius: 6px 0 0 6px;
-}
-#dpad .hub {
-  grid-area: 2 / 2;
-}
-#dpad .right {
-  grid-area: 2 / 3;
-  border-radius: 0 6px 6px 0;
-}
-#dpad .down {
-  grid-area: 3 / 2;
-  border-radius: 0 0 6px 6px;
-}
-
-#dpad[data-dir='up'] .up,
-#dpad[data-dir='down'] .down,
-#dpad[data-dir='left'] .left,
-#dpad[data-dir='right'] .right {
+#stick[data-dir] #stick-knob {
   background: var(--pad-pressed);
 }
 
 #action-btn {
-  width: calc(var(--dpad-cell) * 1.7);
-  height: calc(var(--dpad-cell) * 1.7);
+  flex: none;
+  width: calc(var(--stick) * 0.56);
+  height: calc(var(--stick) * 0.56);
   border-radius: 50%;
   background: var(--pad);
   border: 3px solid var(--outline);

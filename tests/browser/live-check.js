@@ -8,13 +8,13 @@
 // Session 6c: every route is derived from map data. The script fetches the map registry, the maps,
 // the orders and the strings (default: this repo's main branch on raw.githubusercontent.com; set
 // window.__dataBase, e.g. to 'http://localhost:5173/src/data/' with the dev server running, to check a
-// local preview), finds paths over each map's collision grid (BFS), and walks them by dead reckoning:
-// the player moves exactly 1 px per frame held, so a tile is 16 frames, and spawns sit on tile centres.
-// It walks from the start to the Dispatcher, completes Order #1 across warps, then takes a cross-street
-// connector from 37th Ave down to Roosevelt Ave. It reads every name card, text-window line and order
-// ticket off the canvas, glyph by glyph against the shipped font atlas, and checks the fade reaches
-// black, the Spleen notices and page errors. (6c dropped the accented font-test line: it's on test-map,
-// which normal play can't reach; regression N4 covers it on the dev server.)
+// local preview), finds paths over the map's collision grid (BFS), and walks them by dead reckoning:
+// the player moves exactly 2 px per frame held (session 6d), so a tile is 8 frames, and spawns sit on
+// tile centres. Routes are 4-way here (straight moves keep dead reckoning exact; diagonals move 1 or 2 px
+// per axis per step, which regression T2 covers). Since 6d the world is one map with no warps: it walks
+// from a new game's start to the Dispatcher and completes Order #1, and reports the walking time. It reads
+// the start zone's name card, every text-window line and order ticket off the canvas, glyph by glyph
+// against the shipped font atlas, and checks the minimap is drawn, the Spleen notices and page errors.
 // Top-level await: evaluate as an async function body. Returns a results object.
 if (!window.__liveShim) {
   const html = await (await fetch(location.href, { cache: 'no-store' })).text();
@@ -28,6 +28,7 @@ if (!window.__liveShim) {
   'reloaded';
 } else {
   const FRAME = 1000 / 60; let T = performance.now(); let frames = 0;
+  const framesPumped = () => frames;
   const pump = (n) => { for (let i = 0; i < n; i++) { T += FRAME; const f = window.__cb; window.__cb = null; if (!f) return false; f(T); frames++; } return true; };
   const KC = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Space: 32 };
   const ev = (type, code) => window.dispatchEvent(new KeyboardEvent(type, { key: code === 'Space' ? ' ' : code, code, keyCode: KC[code], which: KC[code], bubbles: true }));
@@ -54,7 +55,8 @@ if (!window.__liveShim) {
       const obs = d.layers.find((l) => l.name === 'obstacles').data;
       const npcs = new Set((d.layers.find((l) => l.name === 'npcs')?.objects ?? []).map((o) => `${Math.floor(o.x / 16)},${Math.floor((o.y - 1) / 16)}`));
       const inside = (r, tx, ty) => tx * 16 + 8 >= r.x && tx * 16 + 8 < r.x + r.width && ty * 16 + 8 >= r.y && ty * 16 + 8 < r.y + r.height;
-      return { id, W: d.width, H: d.height, inside, warpAt: (tx, ty) => warpsOf(id).find((w) => inside(w, tx, ty)), open: (tx, ty) => tx >= 0 && ty >= 0 && tx < d.width && ty < d.height && !solid.has(obs[ty * d.width + tx]) && !npcs.has(`${tx},${ty}`) };
+      const wk = walkOf(id); const inWalk = (tx, ty) => !wk || (tx >= wk[0] && ty >= wk[1] && tx < wk[0] + wk[2] && ty < wk[1] + wk[3]);
+      return { id, W: d.width, H: d.height, inside, warpAt: (tx, ty) => warpsOf(id).find((w) => inside(w, tx, ty)), open: (tx, ty) => tx >= 0 && ty >= 0 && tx < d.width && ty < d.height && inWalk(tx, ty) && !solid.has(obs[ty * d.width + tx]) && !npcs.has(`${tx},${ty}`) };
     };
     const STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]]; const KEY = { '1,0': 'ArrowRight', '-1,0': 'ArrowLeft', '0,1': 'ArrowDown', '0,-1': 'ArrowUp' };
     const bfs = (G, start, isGoal) => {
@@ -75,7 +77,9 @@ if (!window.__liveShim) {
     const tile = () => [Math.floor(P.x / 16), Math.floor((P.y - 1) / 16)];
     // The camera follows the feet, clamped to the map; the text window and ticket placement follow from it (MapScene).
     const scroll = () => { const d = MAPS[P.map]; return [Math.max(0, Math.min(d.width * 16 - 256, P.x - 128)), Math.max(0, Math.min(d.height * 16 - 224, P.y - 112))]; };
-    let darkest = 765;
+    let darkest = 765; let walkFrames = 0;
+    // Where the player can walk (map properties walkX/Y/Width/Height, in tiles; since 6d).
+    const walkOf = (id) => { const p = Object.fromEntries((MAPS[id].properties ?? []).map((q) => [q.name, q.value])); return p.walkX === undefined ? null : [p.walkX, p.walkY, p.walkWidth, p.walkHeight]; };
     const hold = (code, n, watchFade = false) => { ev('keydown', code); for (let i = 0; i < n; i++) { pump(1); if (watchFade) { const c = rgbAt(snap(), 128, 112); darkest = Math.min(darkest, (c >> 16) + ((c >> 8) & 255) + (c & 255)); } } ev('keyup', code); pump(1); };
     const DELTA = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] };
     // Walks a tile path; a warp tile at the end is stepped onto and the fade waited out, landing on its target spawn.
@@ -86,11 +90,11 @@ if (!window.__liveShim) {
         while (j < path.length - 1 && path[j + 1][0] - path[j][0] === d[0] && path[j + 1][1] - path[j][1] === d[1]) j++;
         const code = KEY[d.join(',')]; const w = grid(P.map).warpAt(...path[j]);
         if (w) {
-          if (j - i > 1) { hold(code, (j - i - 1) * 16); P.x += d[0] * 16 * (j - i - 1); P.y += d[1] * 16 * (j - i - 1); }
-          hold(code, 16 + 45, true);
+          if (j - i > 1) { hold(code, (j - i - 1) * 8); P.x += d[0] * 16 * (j - i - 1); P.y += d[1] * 16 * (j - i - 1); }
+          hold(code, 8 + 45, true);
           const to = prop(w, 'targetMap'); const sp = spawnOf(to, prop(w, 'targetSpawn')); Object.assign(P, { map: to, x: sp.x, y: sp.y });
           arrivals.push({ map: to, warp: w.name, nameCard: nameCard(nameOf(to)) }); pump(2);
-        } else { hold(code, (j - i) * 16); P.x += d[0] * 16 * (j - i); P.y += d[1] * 16 * (j - i); }
+        } else { hold(code, (j - i) * 8); walkFrames += (j - i) * 8 + 1; P.x += d[0] * 16 * (j - i); P.y += d[1] * 16 * (j - i); }
         i = j;
       }
       return arrivals;
@@ -103,14 +107,14 @@ if (!window.__liveShim) {
       walkPath(bfs(G, tile(), (t) => { const f = STEPS.find(([dx, dy]) => t[0] + dx === tx && t[1] + dy === ty); if (f && !G.warpAt(...t)) face = f; return !!f && !G.warpAt(...t); }));
       return { arrivals, face: KEY[face.join(',')] };
     };
-    // Face a way with a 1-frame tap (moves exactly 1 px), and step back afterwards.
+    // Face a way with a 1-frame tap (moves exactly 2 px; the 3 px gap to a wall or NPC leaves room), and step back afterwards.
     const OPP = { ArrowUp: 'ArrowDown', ArrowDown: 'ArrowUp', ArrowLeft: 'ArrowRight', ArrowRight: 'ArrowLeft' };
-    const faceTap = (code) => { hold(code, 1); P.x += DELTA[code][0]; P.y += DELTA[code][1]; pump(3); };
+    const faceTap = (code) => { hold(code, 1); P.x += 2 * DELTA[code][0]; P.y += 2 * DELTA[code][1]; pump(3); };
     const unTap = (code) => faceTap(OPP[code]);
 
     // Glyph checks against the shipped font atlas (FONT_CHARS order: ASCII 32-126, then 160-255).
     for (let i = 0; i < 100; i++) { pump(5); await new Promise((r) => setTimeout(r, 30)); const px = snap(); if (rgbAt(px, 128, 100) !== 0x1b1528 && rgbAt(px, 128, 100) !== 0) break; }
-    pump(30);
+    pump(30); pump(24); // the zone name card shows after 300 ms in the zone
     R.bundle = document.querySelector('script[src*="index-"]')?.getAttribute('src');
     const atlas = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = 'assets/fonts/spleen-6x12.png'; });
     const acv = document.createElement('canvas'); acv.width = atlas.width; acv.height = atlas.height; const actx = acv.getContext('2d'); actx.drawImage(atlas, 0, 0);
@@ -121,10 +125,11 @@ if (!window.__liveShim) {
     // Text window: 36 columns, words never split (src/systems/textLayout.ts); at the bottom when the player is in the top half.
     const wrap = (text) => { const out = []; let line = ''; for (const w of text.split(' ')) { if (line && (line + ' ' + w).length > 36) { out.push(line); line = w; } else line = line ? line + ' ' + w : w; } out.push(line); return out; };
     const winText = (text) => { const atBottom = P.y - scroll()[1] < 112; return badGlyphs(wrap(text), 8 + 10, (atBottom ? 224 - 8 - 56 : 8) + 8); };
+    // Ticket (6d): centred at the bottom, at the top while it would cover the player.
     const ticketCheck = (lines) => {
       const w = Math.max(...lines.map((l) => l.length)) * 6 + 6; const h = 30; const x = Math.floor((256 - w) / 2); const [sx, sy] = scroll();
-      const left = P.x - 8 - sx; const feet = P.y - sy; const covered = left < x + w && left + 16 > x && feet - 24 < 24 + h && feet > 24;
-      return badGlyphs(lines, x + 3, (covered ? 224 - 4 - h : 24) + 3);
+      const by = 224 - 4 - h; const left = P.x - 8 - sx; const feet = P.y - sy; const covered = left < x + w && left + 16 > x && feet - 24 < by + h && feet > by;
+      return badGlyphs(lines, x + 3, (covered ? 24 : by) + 3);
     };
     const fill = (id, params) => Object.entries(params).reduce((s, [k, v]) => s.split(`{${k}}`).join(v), EN[id]);
     const talk = () => { press(); pump(2); press(); pump(5); }; // open, then finish typing the first page
@@ -132,41 +137,38 @@ if (!window.__liveShim) {
     const close = () => { press(); pump(10); };
 
     // 1. Start -> the Dispatcher (pathfound), face them, take Order #1.
-    const o1 = ORDERS[0]; const item = EN[o1.text.item]; const params = { item, pickup: nameOf(o1.pickup.map), dropoff: nameOf(o1.dropoff.map) };
+    // Places (6d): a delivery point names its nearest intersection, "<street> & <cross>".
+    const placeOf = (stop) => { const p = objs(stop.map, 'deliveryPoint').find((o) => prop(o, 'pointId') === stop.pointId); return fill('place.corner', { street: EN[prop(p, 'street')], cross: EN[prop(p, 'cross')] }); };
+    const o1 = ORDERS[0]; const item = EN[o1.text.item]; const params = { item, pickup: placeOf(o1.pickup), dropoff: placeOf(o1.dropoff) };
+    // The start zone's name card, once the player has stood there 300 ms (pumped above).
+    R.startZoneCard = nameCard(EN['zone.roosevelt-ave.name']);
+    { const px = snap(); let light = 0, dark = 0; for (let y = 6; y < 55; y++) for (let x = 197; x < 251; x++) { const c = rgbAt(px, x, y); if (c === 0xd9d9df) light++; if (c === 0x2a1f3d) dark++; } R.minimapDrawn = light > 200 && dark > 500; }
     const dispNpc = MAPS[REG.start.map].layers.find((l) => l.name === 'npcs').objects.find((o) => prop(o, 'role') === 'dispatcher');
     const toDisp = travel(REG.start.map, [Math.floor(dispNpc.x / 16), Math.floor((dispNpc.y - 1) / 16)]);
     R.startToDispatcherTiles = `${startSpawn.x},${startSpawn.y} -> ${P.x},${P.y}`;
     faceTap(toDisp.face); talk();
     R.order_dispatcherGreeting = winText(fill('dialogue.dispatcher.hello.1', { name: EN['npc.dispatcher.name'] }));
     next(); R.order_assignLine = winText(fill(o1.text.assign, params)); close(); unTap(toDisp.face);
-    const ticket1 = [fill('hud.order.assigned', { item }), fill('hud.go.assigned', { map: params.pickup })];
+    const ticket1 = [fill('hud.order.assigned', { item }), fill('hud.go.assigned', { place: params.pickup })];
     R.order_ticketAssigned = ticketCheck(ticket1);
 
-    // 2. To the pickup, through warps (each arrival's name card read), pick up.
+    // 2. To the pickup (one map, no warps since 6d), pick up.
     const pt = (stop) => { const p = objs(stop.map, 'deliveryPoint').find((o) => prop(o, 'pointId') === stop.pointId); return [p.x / 16, p.y / 16]; };
     const leg1 = travel(o1.pickup.map, pt(o1.pickup));
-    R.leg1 = leg1.arrivals.map((a) => `${a.warp} -> ${a.map}`); R.leg1_nameCards = leg1.arrivals.flatMap((a) => a.nameCard);
+    R.leg1_warps = leg1.arrivals.length;
     R.order_ticketAfterLeg1 = ticketCheck(ticket1);
     faceTap(leg1.face); talk(); R.order_pickedUpLine = winText(fill(o1.text.pickedUp, params)); close(); unTap(leg1.face);
-    const ticket2 = [fill('hud.order.picked-up', { item }), fill('hud.go.picked-up', { map: params.dropoff })];
+    const ticket2 = [fill('hud.order.picked-up', { item }), fill('hud.go.picked-up', { place: params.dropoff })];
     R.order_ticketPickedUp = ticketCheck(ticket2);
 
     // 3. To the dropoff, deliver; the ticket goes.
     const leg2 = travel(o1.dropoff.map, pt(o1.dropoff));
-    R.leg2 = leg2.arrivals.map((a) => `${a.warp} -> ${a.map}`); R.leg2_nameCards = leg2.arrivals.flatMap((a) => a.nameCard);
+    R.leg2_warps = leg2.arrivals.length;
     R.order_ticketAfterLeg2 = ticketCheck(ticket2);
     faceTap(leg2.face); talk(); R.order_deliveredLine = winText(fill(o1.text.delivered, params)); close(); unTap(leg2.face);
-    { const px = snap(); let box = 0; for (let y = 27; y < 51; y++) for (let x = 47; x < 209; x++) if (rgbAt(px, x, y) === 0x2a1f3d) box++; R.order_ticketHiddenAfterDelivery = box < 40; }
-
-    // 4. A cross-street connector: from 37th Ave, take the nearest connector warp down to Roosevelt Ave.
-    const conn = (w) => /^to-roosevelt-ave[a-z0-9-]*-n-\d+-roosevelt$/.test(w.name);
-    if (!warpsOf(P.map).some(conn)) throw new Error(`no cross-street connector on ${P.map}`);
-    const G = grid(P.map); const cw = bfs(G, tile(), (t) => { const w = G.warpAt(...t); return !!w && conn(w); });
-    const crossed = walkPath(cw);
-    R.crossStreet = crossed.map((a) => `${a.warp} -> ${a.map}`); R.crossStreet_nameCards = crossed.flatMap((a) => a.nameCard);
-    R.crossStreetOk = crossed.length === 1 && crossed[0].map.startsWith('roosevelt-ave') && conn({ name: crossed[0].warp });
-
-    R.fadeReachedBlack = darkest <= 3;
+    // Gone: the picked-up ticket's text is no longer drawn (most of its glyphs fail to match).
+    R.order_ticketHiddenAfterDelivery = ticketCheck(ticket2).length > ticket2.join('').length / 2;
+    R.walkingTime = `${walkFrames} frames walked = ${(walkFrames / 60).toFixed(1)} s (start -> Dispatcher -> pickup -> dropoff; ${framesPumped()} frames in all incl. dialogue)`;
     const notices = await (await fetch('THIRD-PARTY-NOTICES.txt', { cache: 'no-store' })).text();
     const js = await (await fetch(R.bundle, { cache: 'no-store' })).text();
     R.noticesHaveSpleen = notices.includes('Spleen 6x12 2.2.0') && notices.includes('Frederic Cambus');
@@ -174,7 +176,7 @@ if (!window.__liveShim) {
   } catch (e) { R.ERROR = String(e && e.stack || e); }
   R.errors = window.__errors;
   R.framesPumped = frames;
-  const glyphChecks = Object.keys(R).filter((k) => /^order_(?!ticketHidden)|_nameCards$/.test(k));
-  R.summary = glyphChecks.every((k) => Array.isArray(R[k]) && R[k].length === 0) && R.order_ticketHiddenAfterDelivery && R.crossStreetOk && R.fadeReachedBlack && R.noticesHaveSpleen && R.bannerMentionsSpleen && R.errors.length === 0 && !R.ERROR ? 'PASS' : 'FAIL';
+  const glyphChecks = Object.keys(R).filter((k) => /^order_(?!ticketHidden)|^startZoneCard$/.test(k));
+  R.summary = glyphChecks.every((k) => Array.isArray(R[k]) && R[k].length === 0) && R.order_ticketHiddenAfterDelivery && R.minimapDrawn && R.leg1_warps === 0 && R.leg2_warps === 0 && R.noticesHaveSpleen && R.bannerMentionsSpleen && R.errors.length === 0 && !R.ERROR ? 'PASS' : 'FAIL';
   R;
 }

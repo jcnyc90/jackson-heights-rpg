@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { Direction } from '../config';
+import { DIRECTIONS_8, STEP, type Direction, type Direction8 } from '../config';
 import { touchState } from './touchControls';
 
 const { KeyCodes } = Phaser.Input.Keyboard;
@@ -13,11 +13,12 @@ const DIRECTION_KEYS: Record<Direction, number[]> = {
 const ACTION_KEYS = [KeyCodes.SPACE, KeyCodes.ENTER, KeyCodes.Z];
 
 /**
- * Merges keyboard and on-screen touch input into one 4-way direction + action.
+ * Merges keyboard and on-screen touch input into one 8-way direction + action (session 6d:
+ * two direction keys give a diagonal; the thumbstick snaps to eight sectors).
  *
  * Can be locked (e.g. during a map fade). While locked it reports nothing, and every press
- * that exists during the lock goes stale: a stale key or D-pad press is ignored until it is
- * released, so a hold never carries over into the next map. Auto-repeat keydowns are stale
+ * that exists during the lock goes stale: a stale key or thumbstick press is ignored until it
+ * is released, so a hold never carries over into the next map. Auto-repeat keydowns are stale
  * too: Phaser recreates its Key objects when a scene restarts, and a held key's next repeat
  * would otherwise look like a fresh press.
  */
@@ -25,8 +26,8 @@ export class Controls {
   private readonly directionKeys: [Direction, Phaser.Input.Keyboard.Key][] = [];
   private readonly actionKeys: Phaser.Input.Keyboard.Key[];
   private readonly staleKeys = new Set<Phaser.Input.Keyboard.Key>();
-  /** D-pad presses up to this count are stale (see touchState.dpadPresses). */
-  private staleDpadPresses = -1;
+  /** Thumbstick presses up to this count are stale (see touchState.stickPresses). */
+  private staleStickPresses = -1;
   private locked = false;
 
   constructor(scene: Phaser.Scene) {
@@ -55,25 +56,28 @@ export class Controls {
   }
 
   /**
-   * The touch D-pad wins; otherwise the most recently pressed direction key still held.
-   * Keys pressed with Cmd held are ignored: macOS browsers never send their keyup, so
-   * Cmd+A / Cmd+D would otherwise leave the player walking forever.
+   * The thumbstick wins; otherwise the held direction keys: on each axis (up/down, left/right)
+   * the most recently pressed one, so two keys on different axes give a diagonal. Keys pressed
+   * with Cmd held are ignored: macOS browsers never send their keyup, so Cmd+A / Cmd+D would
+   * otherwise leave the player walking forever.
    */
-  direction(): Direction | null {
+  direction(): Direction8 | null {
     if (this.locked) {
-      this.staleDpadPresses = touchState.dpadPresses;
+      this.staleStickPresses = touchState.stickPresses;
       return null;
     }
-    if (touchState.direction && touchState.dpadPresses > this.staleDpadPresses) return touchState.direction;
-    let latest: Direction | null = null;
-    let latestTime = -Infinity;
+    if (touchState.direction && touchState.stickPresses > this.staleStickPresses) return touchState.direction;
+    const latest = { vertical: { dir: null as Direction | null, time: -Infinity }, horizontal: { dir: null as Direction | null, time: -Infinity } };
     for (const [dir, key] of this.directionKeys) {
-      if (key.isDown && !key.metaKey && !this.staleKeys.has(key) && key.timeDown > latestTime) {
-        latest = dir;
-        latestTime = key.timeDown;
+      const axis = latest[dir === 'up' || dir === 'down' ? 'vertical' : 'horizontal'];
+      if (key.isDown && !key.metaKey && !this.staleKeys.has(key) && key.timeDown > axis.time) {
+        axis.dir = dir;
+        axis.time = key.timeDown;
       }
     }
-    return latest;
+    const x = latest.horizontal.dir ? STEP[latest.horizontal.dir].x : 0;
+    const y = latest.vertical.dir ? STEP[latest.vertical.dir].y : 0;
+    return DIRECTIONS_8.find((d) => STEP[d].x === x && STEP[d].y === y) ?? null;
   }
 
   /** True once per press of any action input. Presses made while locked are swallowed. */
@@ -85,12 +89,12 @@ export class Controls {
     return pressed && !this.locked;
   }
 
-  /** Locking makes every key and D-pad press held right now stale (ignored until released). */
+  /** Locking makes every key and thumbstick press held right now stale (ignored until released). */
   setLocked(locked: boolean): void {
     this.locked = locked;
     if (!locked) return;
     for (const key of this.allKeys()) if (key.isDown) this.staleKeys.add(key);
-    this.staleDpadPresses = touchState.dpadPresses;
+    this.staleStickPresses = touchState.stickPresses;
   }
 
   isLocked(): boolean {

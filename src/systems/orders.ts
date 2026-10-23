@@ -61,7 +61,9 @@ function parseOrder(entry: unknown, index: number, ids: Set<string>): Order {
     const pointId = str(s.pointId, `${name}.pointId`);
     const info = getMap(map);
     if (!info) throw new Error(`${where}: ${name} names unknown map "${map}"`);
-    if (!info.deliveryPoints.some((p) => p.pointId === pointId)) throw new Error(`${where}: map "${map}" has no delivery point "${pointId}"`);
+    const point = info.deliveryPoints.find((p) => p.pointId === pointId);
+    if (!point) throw new Error(`${where}: map "${map}" has no delivery point "${pointId}"`);
+    for (const sid of [point.street, point.cross]) if (sid !== undefined && !hasString(sid)) throw new Error(`${where}: ${name} point "${pointId}" names missing string "${sid}"`);
     return { map, pointId };
   };
   const pickup = stop('pickup');
@@ -81,8 +83,18 @@ function parseOrder(entry: unknown, index: number, ids: Set<string>): Order {
 /** Every order, in the order the dispatcher hands them out. */
 export const ORDERS: readonly Order[] = parseOrders(data);
 
-/** Placeholder values for an order's strings: {item}, {pickup}, {dropoff} (map display names), {reward}. */
+/**
+ * Where a stop is, for the player: its point's nearest intersection ("74th St & 37th Rd", since
+ * session 6d), or the map's display name on maps whose points don't name one.
+ */
+export function placeName(stop: OrderStop): string {
+  const info = getMap(stop.map);
+  const point = info?.deliveryPoints.find((p) => p.pointId === stop.pointId);
+  if (point?.street && point.cross) return t('place.corner', { street: t(point.street), cross: t(point.cross) });
+  return t(info?.nameId ?? stop.map);
+}
+
+/** Placeholder values for an order's strings: {item}, {pickup}, {dropoff} (place names, see placeName), {reward}. */
 export function orderParams(order: Order): Record<string, string | number> {
-  const mapName = (id: string) => t(getMap(id)?.nameId ?? id);
-  return { item: t(order.text.item), pickup: mapName(order.pickup.map), dropoff: mapName(order.dropoff.map), reward: order.reward };
+  return { item: t(order.text.item), pickup: placeName(order.pickup), dropoff: placeName(order.dropoff), reward: order.reward };
 }

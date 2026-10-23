@@ -4,8 +4,8 @@
       "id": "order-1",
       "itemId": "order-1",
       "reward": 10,
-      "pickup": { "map": "diversity-plaza-74th", "pointId": "plaza-37rd-1" },
-      "dropoff": { "map": "ave-37", "pointId": "ave37-77-1" },
+      "pickup": { "map": "jackson-heights", "pointId": "plaza-37rd-1" },
+      "dropoff": { "map": "jackson-heights", "pointId": "ave37-77-1" },
       "text": {
         "item": "item.order-1.name",
         "assign": "order.order-1.assign",
@@ -17,8 +17,8 @@
       "id": "order-2",
       "itemId": "order-2",
       "reward": 15,
-      "pickup": { "map": "ave-37-79-84", "pointId": "ave37-83-1" },
-      "dropoff": { "map": "roosevelt-ave-84-90", "pointId": "rav-86-1" },
+      "pickup": { "map": "jackson-heights", "pointId": "ave37-83-1" },
+      "dropoff": { "map": "jackson-heights", "pointId": "rav-86-1" },
       "text": {
         "item": "item.order-2.name",
         "assign": "order.order-2.assign",
@@ -30,8 +30,8 @@
       "id": "order-3",
       "itemId": "order-3",
       "reward": 20,
-      "pickup": { "map": "historic-district", "pointId": "hd-79-1" },
-      "dropoff": { "map": "diversity-plaza-74th", "pointId": "plaza-triangle-1" },
+      "pickup": { "map": "jackson-heights", "pointId": "nb-80-1" },
+      "dropoff": { "map": "jackson-heights", "pointId": "plaza-triangle-1" },
       "text": {
         "item": "item.order-3.name",
         "assign": "order.order-3.assign",

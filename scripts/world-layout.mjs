@@ -1,5 +1,5 @@
 // Grid-to-tile layout for the world dataset (DESIGN.md 2.14). Shared by the validator, which
-// checks each map's `tiles` against it, and by the map generator (scripts/generate-maps.mjs).
+// checks the map's `tiles` against it, and by the map generator (scripts/generate-maps.mjs).
 // No dependencies.
 
 /**
@@ -27,25 +27,24 @@ export function halfWidthOf(layout, streetId) {
 }
 
 /**
- * A map's tile box: every node its segments touch, plus the margin on each side.
- * Returns { x0, y0, width, height } in tile coordinates (x0, y0 = the map's top-left tile).
+ * The map's boxes, in tile coordinates of the grid (x = 0 at the first street's centre line):
+ * `walk`, every node plus the layout's `edge` on each side (the player can't leave it), and
+ * `map`, that plus `viewMargin` (scenery, so the camera never stops scrolling while the player
+ * can still move). Each is { x0, y0, width, height }.
  */
-export function mapBox(layout, map, segmentsById, nodesById) {
-  const xs = [];
-  const ys = [];
-  for (const sid of map.segments) {
-    const s = segmentsById.get(sid);
-    for (const nid of [s.from, s.to]) {
-      const [x, y] = tileOf(layout, nodesById.get(nid).grid);
-      xs.push(x);
-      ys.push(y);
-    }
-  }
-  const m = layout.margin;
-  const x0 = Math.min(...xs) - m;
-  const y0 = Math.min(...ys) - m;
-  return { x0, y0, width: Math.max(...xs) + m - x0, height: Math.max(...ys) + m - y0 };
+export function mapBoxes(layout, nodes) {
+  const pts = nodes.map((n) => tileOf(layout, n.grid));
+  const xs = pts.map(([x]) => x);
+  const ys = pts.map(([, y]) => y);
+  const grow = (m) => ({ x0: Math.min(...xs) - m, y0: Math.min(...ys) - m, width: Math.max(...xs) - Math.min(...xs) + 2 * m, height: Math.max(...ys) - Math.min(...ys) + 2 * m });
+  return { walk: grow(layout.edge), map: grow(layout.edge + layout.viewMargin) };
 }
+
+/**
+ * Smallest viewMargin, in tiles, that keeps the camera from ever stopping while the player
+ * walks: half the screen (256 x 224 px; 8 x 7 tiles) on every side.
+ */
+export const MIN_VIEW_MARGIN = 8;
 
 /** Problems with the layout block itself (empty when it's usable). */
 export function layoutProblems(layout) {
@@ -53,8 +52,9 @@ export function layoutProblems(layout) {
   if (layout === null || typeof layout !== 'object') return ['layout: must be an object'];
   const posInt = (v) => Number.isInteger(v) && v > 0;
   if (!posInt(layout.tileX)) p.push('layout.tileX: must be a positive integer');
-  if (!posInt(layout.margin)) p.push('layout.margin: must be a positive integer');
-  if (!posInt(layout.stubLength)) p.push('layout.stubLength: must be a positive integer');
+  if (!posInt(layout.edge)) p.push('layout.edge: must be a positive integer');
+  if (!Number.isInteger(layout.viewMargin) || layout.viewMargin < MIN_VIEW_MARGIN) p.push(`layout.viewMargin: must be an integer of at least ${MIN_VIEW_MARGIN} (half the screen)`);
+  for (const old of ['margin', 'stubLength']) if (old in layout) p.push(`layout.${old}: retired in schema 4 (one map, no link stubs)`);
   const hw = layout.halfWidth;
   if (hw === null || typeof hw !== 'object' || !posInt(hw.default)) p.push('layout.halfWidth: needs a positive integer "default"');
   else for (const [k, v] of Object.entries(hw)) if (!posInt(v)) p.push(`layout.halfWidth.${k}: must be a positive integer`);

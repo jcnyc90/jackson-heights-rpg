@@ -30,6 +30,35 @@ export interface Warp {
 export interface DeliveryPoint {
   objectId: number;
   pointId: string;
+  /** String IDs of the nearest intersection's two streets (the order ticket's "74th St & 37th Rd"), if the map gives them. */
+  street?: string;
+  cross?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A street-name sign: the two streets of an intersection, drawn with one corner (`align`) at x, y. */
+export interface StreetSign {
+  street: string;
+  cross: string;
+  align: 'nw' | 'ne' | 'sw' | 'se';
+  x: number;
+  y: number;
+}
+
+/** A named area of a map (layer "zones"): the zone's name card shows when the player walks in. */
+export interface ZoneRect {
+  zoneId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A rectangle in map pixels. */
+export interface Rect {
   x: number;
   y: number;
   width: number;
@@ -46,11 +75,30 @@ export interface MapInfo {
   spawns: Spawn[];
   warps: Warp[];
   deliveryPoints: DeliveryPoint[];
+  /** Street signs (layer "labels") and zone areas (layer "zones"); empty on maps without them. */
+  signs: StreetSign[];
+  zones: ZoneRect[];
+  /** Where the player can walk, in map pixels (map properties walkX/Y/Width/Height, in tiles); the whole map if not set. */
+  walk: Rect;
 }
 
 export interface Destination {
   map: MapInfo;
   spawn: Spawn;
+}
+
+interface TiledProperty {
+  name: string;
+  value: unknown;
+}
+
+interface TiledMap {
+  width?: number;
+  height?: number;
+  tilewidth?: number;
+  tileheight?: number;
+  properties?: TiledProperty[];
+  layers?: { name: string; type: string; objects?: TiledObject[] }[];
 }
 
 interface TiledObject {
@@ -73,7 +121,7 @@ export const OBJECT_LAYER = 'objects';
  * carry targetMap and targetSpawn, "deliveryPoint" rectangles carry pointId. Malformed objects
  * throw in every build, like NPCs do; a broken map should never ship.
  */
-export function readObjects(mapId: string, data: { layers?: { name: string; type: string; objects?: TiledObject[] }[] }) {
+export function readObjects(mapId: string, data: TiledMap) {
   const layer = data.layers?.find((l) => l.name === OBJECT_LAYER && l.type === 'objectgroup');
   if (!layer?.objects) throw new Error(`Map "${mapId}" needs an object layer "${OBJECT_LAYER}"`);
   const spawns: Spawn[] = [];
@@ -103,7 +151,9 @@ export function readObjects(mapId: string, data: { layers?: { name: string; type
       const pointId = str('pointId');
       if (obj.point || width <= 0 || height <= 0) throw new Error(`${where}: a delivery point must be a rectangle`);
       if (deliveryPoints.some((p) => p.pointId === pointId)) throw new Error(`${where}: duplicate pointId "${pointId}"`);
-      deliveryPoints.push({ objectId: obj.id, pointId, x: obj.x, y: obj.y, width, height });
+      // The nearest intersection, as two street-name string IDs: both or neither.
+      const named = props.has('street') || props.has('cross');
+      deliveryPoints.push({ objectId: obj.id, pointId, ...(named ? { street: str('street'), cross: str('cross') } : {}), x: obj.x, y: obj.y, width, height });
     } else {
       throw new Error(`${where}: class must be "spawn", "warp" or "deliveryPoint", not "${obj.type ?? ''}"`);
     }
@@ -112,12 +162,56 @@ export function readObjects(mapId: string, data: { layers?: { name: string; type
   return { spawns, warps, deliveryPoints };
 }
 
+const ALIGNS = ['nw', 'ne', 'sw', 'se'] as const;
+
+/**
+ * Reads the optional layers of a generated map: street signs ("labels": points of class
+ * "streetSign" with string properties street, cross and align) and zone areas ("zones":
+ * rectangles of class "zone" with string property zoneId), and the walkable area (int map
+ * properties walkX, walkY, walkWidth, walkHeight, in tiles). Malformed entries throw, like objects.
+ */
+export function readExtras(mapId: string, data: TiledMap) {
+  const tw = data.tilewidth ?? 16;
+  const th = data.tileheight ?? 16;
+  const objectsOf = (name: string) => data.layers?.find((l) => l.name === name && l.type === 'objectgroup')?.objects ?? [];
+  const props = (obj: TiledObject) => new Map((obj.properties ?? []).map((p) => [p.name, p.value]));
+  const str = (where: string, map: Map<string, unknown>, name: string): string => {
+    const v = map.get(name);
+    if (typeof v !== 'string' || v === '') throw new Error(`${where}: needs string property "${name}"`);
+    return v;
+  };
+  const signs: StreetSign[] = objectsOf('labels').map((obj) => {
+    const where = `Map "${mapId}", sign ${obj.id} ("${obj.name ?? ''}")`;
+    const p = props(obj);
+    const align = str(where, p, 'align') as StreetSign['align'];
+    if (obj.type !== 'streetSign' || !obj.point) throw new Error(`${where}: must be a point of class "streetSign"`);
+    if (!ALIGNS.includes(align)) throw new Error(`${where}: align must be one of ${ALIGNS.join('/')}`);
+    return { street: str(where, p, 'street'), cross: str(where, p, 'cross'), align, x: obj.x, y: obj.y };
+  });
+  const zones: ZoneRect[] = objectsOf('zones').map((obj) => {
+    const where = `Map "${mapId}", zone area ${obj.id} ("${obj.name ?? ''}")`;
+    const { width = 0, height = 0 } = obj;
+    if (obj.type !== 'zone' || obj.point || width <= 0 || height <= 0) throw new Error(`${where}: must be a rectangle of class "zone"`);
+    return { zoneId: str(where, props(obj), 'zoneId'), x: obj.x, y: obj.y, width, height };
+  });
+  const mp = new Map((data.properties ?? []).map((p) => [p.name, p.value]));
+  const keys = ['walkX', 'walkY', 'walkWidth', 'walkHeight'];
+  const full: Rect = { x: 0, y: 0, width: (data.width ?? 0) * tw, height: (data.height ?? 0) * th };
+  let walk = full;
+  if (keys.some((k) => mp.has(k))) {
+    const [x, y, w, h] = keys.map((k) => mp.get(k));
+    if (![x, y, w, h].every((v) => Number.isInteger(v))) throw new Error(`Map "${mapId}": walkX, walkY, walkWidth and walkHeight must all be int properties`);
+    walk = { x: (x as number) * tw, y: (y as number) * th, width: (w as number) * tw, height: (h as number) * th };
+  }
+  return { signs, zones, walk };
+}
+
 const MAPS = new Map<string, MapInfo>();
 for (const entry of registry.maps) {
   const data = FILES[`../data/maps/${entry.file}`];
   if (!data) throw new Error(`Map registry: "${entry.id}" points at missing file "${entry.file}"`);
   if (MAPS.has(entry.id)) throw new Error(`Map registry: duplicate id "${entry.id}"`);
-  MAPS.set(entry.id, { id: entry.id, nameId: entry.name, data, ...readObjects(entry.id, data) });
+  MAPS.set(entry.id, { id: entry.id, nameId: entry.name, data, ...readObjects(entry.id, data), ...readExtras(entry.id, data) });
 }
 
 export const MAP_LIST: readonly MapInfo[] = [...MAPS.values()];
