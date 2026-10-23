@@ -12,7 +12,7 @@ This document has three parts:
 2. **Technical conventions:** set in session 1 to keep future work cheap. They're cheap to change now and get more expensive later.
 3. **Roadmap and open questions.**
 
-Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1. Section 2.11 covers dialogue and NPCs (session 3), 2.12 maps, warps and zones (session 4), 2.13 the delivery loop (session 5), and 2.14 the world dataset (session 6a).
+Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1. Section 2.11 covers dialogue and NPCs (session 3), 2.12 maps, warps and zones (session 4), 2.13 the delivery loop (session 5), and 2.14 the world dataset (sessions 6a and 6b).
 
 ---
 
@@ -181,7 +181,7 @@ The player's collision box (`PLAYER_FEET`, 10×8) is centred at the bottom of th
 - **Text window speed is fixed** at 30 characters/s; a text-speed setting belongs to the settings work (roadmap session 7).
 - **Tiles don't y-sort:** sprites sort by feet y; `obstacles` tiles draw under every sprite and `above` tiles over every sprite. That covers trees and awnings. Anything that must be in front of some sprites and behind others at the same spot (e.g. a lamp post a player walks around on both sides) still needs a sprite, not a tile.
 - **Map display name card** is plain text on a dark box, drawn by `MapScene` for 1.5 s after a warp. Placeholder UI.
-- **World dataset is unverified:** every fact in `src/data/world/jackson-heights.json` came from web-search summaries, not LION. Verify before 6b builds maps from it (2.14).
+- **World dataset is ahead of the maps:** `src/data/world/jackson-heights.json` is verified against LION 26C and covers all four zones (2.14), but the game still plays the session 4 stub maps until 6c builds the real ones.
 - **Order ticket** is plain text on a dark box (placeholder UI, like the name card). It's sized to its text: a map name longer than about 30 characters makes it wider than the 4:3 safe area checked by touch-check.js (2.13).
 - **Delivery state is in memory only:** a reload loses the active order and the reward total. Saves come later.
 - **The tileset PNG is a copy** of generated art. H6 guards drift; it goes away when real tiles replace the placeholder.
@@ -307,33 +307,107 @@ The Dispatcher's own `dialogueId` lines come first, then the order line. NPCs co
 
 The Dispatcher stands on the test map's south-east sidewalk at (440, 288), outside every session 1–4 render shot and walk.
 
-### 2.14 World dataset (session 6a)
+### 2.14 World dataset (sessions 6a, 6b)
 
-The real geography the maps will be built from, kept as data: `src/data/world/jackson-heights.json`. The game doesn't load it yet. Session 6b turns it into Tiled maps. Check it with `npm run validate:world` (the validator, `scripts/validate-world.mjs`) and `npm run test:world` (its tests).
+The real geography the maps will be built from, kept as data: `src/data/world/jackson-heights.json` (schema version 2). The game doesn't load it yet; session 6c turns it into Tiled maps. Check it with `npm run validate:world` (the validator, `scripts/validate-world.mjs`) and `npm run test:world` (its tests).
 
-**Bounds (first pass).** Roosevelt Ave from 73rd to 75th St; 74th St / Diversity Plaza; north to 37th Ave. Widen later by adding streets, nodes and segments; nothing in the schema assumes these bounds.
+**Bounds (6b).** All four zones of locked decision #1, at their verified extent: west 73rd St, east 90th St, north 34th Ave (Northern Blvd only at the 78th Street Plaza), south Roosevelt Ave plus the station triangle down to Broadway at 74th–75th St. 6a's first-pass bounds were Roosevelt Ave 73rd–75th St with three zones; the owner's 6b brief widened them to all four zones at their real extent. The exact edges below are Claude's proposal within that brief.
 
-**Source and licence decision (owner, session 6a).** The maps are hand-drawn, using NYC city data as a reference, not OpenStreetMap. Why not OSM: under ODbL the dataset JSON would be a derived database, which must stay under ODbL share-alike. That can't carry CC BY-NC-SA's non-commercial term. What the dataset holds is facts: street names, which streets meet, their order and rough angle, and which segments are plaza or under the elevated 7. Facts aren't copyrightable, and no third-party geometry is copied, so the file is ours and sits under CC BY-NC-SA with the rest of `src/data/**`. NYC Open Data has no use restrictions (FAQ; Local Law 11 of 2012). The Terms of Use say the City may require apps to name the source and modifications, and to show a disclaimer. If LION coordinates are ever copied into the repo, add a source and disclaimer line to the credits first.
+**Source and licence decision (owner, session 6a; reaffirmed in the 6b brief).** The maps are hand-drawn, using NYC city data as a reference, not OpenStreetMap. Why not OSM: under ODbL the dataset JSON would be a derived database, which must stay under ODbL share-alike. That can't carry CC BY-NC-SA's non-commercial term. What the dataset holds is facts: street names, which streets meet, their order, which segments are pedestrian-only or under the elevated 7, and LION ids that point back to the source records. It holds **no coordinates or geometry**. Facts aren't copyrightable, so the file is ours and sits under CC BY-NC-SA with the rest of `src/data/**`. NYC Open Data has no use restrictions (its FAQ: "There are no restrictions on the use of Open Data"); OPEN-NY (data.ny.gov, the MTA data) asks for no attribution or share-alike; DCP disclaims any warranty for LION. The README credits all of them anyway (README → License → World data).
 
-**Model.** An abstract grid, not coordinates. Distances are stylized; the generator (6b) picks tile sizes.
+**Sources read in 6b** (accessed 2026-10-23; raw downloads stay in the gitignored `logs/s6b-src/`, never committed):
 
-| Collection | Fields | Becomes (6b) |
+| Source id | What | Version |
+|-----------|------|---------|
+| `dcp-lion` | DCP LION File Geodatabase, layer `lion`, generic features | 26C (August 2026), sha256 `9fdf0803…3dac31` |
+| `lpc-historic-districts` | LPC Historic Districts, NYC Open Data `skyk-mpzq` | rows updated 2026-06-18 |
+| `dot-ped-plazas` | DOT Pedestrian Plazas – Polygon, `k5k6-6jex` | rows updated 2026-10-01 |
+| `parks-properties` | Parks Properties, `enfh-gkve` (Travers Park, Q303) | rows updated 2026-10-16 |
+| `mta-stations` / `mta-entrances` | MTA Subway Stations `39hk-dx4f` / Entrances and Exits: 2024 `i9wp-a4ja` (data.ny.gov) | rows updated 2026-10-23 / 2025-12-05 |
+| `nypd-advisory-2023-06`, `cbs-queens-pride-2026` | Queens Pride Parade closures: NYPD 2023 advisory; 2026 DOT closures as reported by CBS New York | 2023, 2026 |
+| `nyc-opendata-faq`, `nyc-terms`, `open-ny-terms` | Licence terms | read 2026-10-23 |
+
+The 6a search-summary sources (Wikipedia, the MTA line map, the CECM and DOT 2015 plaza pages, a StreetEasy building listing, and the "Queens grid" general-knowledge entry) were dropped: every fact they backed is now backed by a source read in full. The StreetEasy entry was a residential building listing tied to a street address, which the privacy rule keeps out of the repo.
+
+**Model.** An abstract grid, not coordinates. x = 0 at 73rd St, +1 per numbered street east (90th St = 17); y = 0 at 37th Ave, −1 35th Ave, −2 34th Ave, −3 Northern Blvd, 1 37th Rd, 2 Roosevelt Ave. Fractions place Broadway and the streets that meet Roosevelt from the south (interpolated from LION, rounded to 0.01). Only order and topology are real; distances are stylized.
+
+| Collection | Fields | Becomes (6c) |
 |------------|--------|--------------|
-| `sources` | `id`, `title`, `url`, `publisher`, `accessed`, `access` (`read` / `search-summary` / `not-downloaded` / `general-knowledge`), `usedFor`, optional `role: licence` | Credits and this section |
-| `streets` | `id`, `name`, `orientation` (`ns`, `ew`, `diagonal`), `sources`, `confidence` | Street name signs, map names |
-| `nodes` | `id`, `streets` (2+), `grid: [x, y]` (x = 0 at 73rd St, +1 per street east; y = 0 at 37th Ave, +1 per avenue south; fractions for Broadway) | Intersections |
-| `segments` | `id`, `street`, `from`, `to` (nodes on that street), `use` (`road`, `plaza`), optional `overhead` (transit id), `sources`, `confidence` | Walkable street and plaza tiles |
-| `transit` | `id`, `kind`, `segments` or `entrances`, `sources`, `confidence` | El pillars and station entrances (scenery, not warps) |
-| `zones` | `id` (= map id), `name`, `summary`, `segments` | One Tiled map each |
-| `connections` | `id`, `zones` (exactly 2), `at` (a node both zones touch) | A warp pair plus spawns |
+| `sources` | `id`, `title`, `url`, `publisher`, `accessed`, `access` (`read` / `search-summary` / `not-downloaded` / `general-knowledge`), `usedFor`; optional `version`, `download`, `sha256`, `terms`, `role: licence` | Credits and this section |
+| `streets` | `id`, `name`, `orientation` (`ns`, `ew`, `diagonal`), optional `stub: true` (only its mouth is in the bounds; no segments), fact fields | Street name signs, map names |
+| `nodes` | `id`, `streets` (2+), `grid: [x, y]`, `lion` (LION node id) | Intersections |
+| `segments` | `id`, `street`, `from`, `to`, `use` (`road`, `plaza`), optional `overhead` (transit id), `lion` (LION segment ids along it), optional `unmapped` (why it's in no zone), fact fields | Walkable street and plaza tiles |
+| `transit` | `id`, `kind` (`elevated-line` with `segments`; `station` with `at`, `entrances`, `mtaComplexId`, `routes`), fact fields | El pillars, station stairs (scenery, not warps) |
+| `areas` | `id`, `name`, `kind` (`historic-district`, `pedestrian-plaza`, `park`, `event-route`), `segments`, fact fields | Ground and building style, signage (real public place names only) |
+| `zones` | `id`, `name`, `summary`, `segments`, `lockedDecision` | A set of maps (the split plan) |
+| `connections` | `id`, `zones` (exactly 2), `at` (a node both touch), `kind` (`open` = a way through; `wall` = 6c blocks it) | Warp pairs plus spawns, or walls |
+| `maps` | `id`, `zone`, `tiles: [w, h]`, `status` (`proposed`, `built`), `summary`, `segments` | One Tiled map each |
+| `mapConnections` | `id`, `maps` (2, same zone), `at` (every node both maps touch) | Edge warps between the maps of one zone |
 | `anchors` | `id` (= `pointId`, unique across the dataset), `zone`, `segment`, `side`, `t` (0–1 along the segment), `uses` (`pickup`, `dropoff`, `dispatcher`), optional `landmark` | `deliveryPoint` objects; the Dispatcher's spot |
 | `landmarks` | `id`, `zone`, `kind`, `fictional: true` (required), `placeholder` | Fictional storefronts (fiction boundary, section 1 #5) |
 
-**Validation.** Every problem is reported, not just the first, and any error fails the run (exit 1). Checks: unique kebab-case ids; every fact has at least one known source and a confidence; segments join nodes on their own street, along the grid for `ns`/`ew` streets; a segment is in at most one zone; every zone is reachable through connections; each connection's node is on a segment of both zones; anchor sides fit the street's orientation; exactly one Dispatcher anchor; landmarks are `fictional: true`. Warnings (no failure): segments in no zone, zones sharing a node with no connection there, zones with no pickup/dropoff anchor, uncited sources. It also lists **unverified facts**: anything below `high` confidence, or not backed by at least one source read in full.
+Fact fields: `sources`, `confidence` (`high`, `medium`, `low`) and `status` (`verified`, `corrected` = 6a had it wrong and it was fixed, `unverified`).
 
-**Current state.** 3 zones (`roosevelt-ave`, `diversity-plaza-74th`, `ave-37`), 7 streets, 11 nodes, 16 segments, 4 connections, 7 anchors (one is the Dispatcher's), 3 fictional landmarks, 9 sources. All 25 facts are unverified. The 6a session couldn't reach nyc.gov, NYC Open Data or Wikipedia (blocked from its container), so every source was read through web-search summaries. Lowest confidence: whether 37th Rd continues east of 74th St (`seg-37rd-74-75`, unowned) and Broadway's crossing points (`n-73-bway`, `n-74-bway`). Each zone keeps the id of the stub map it replaces, so map ids and string IDs don't change. `ave-37` is new.
+**Validation.** Every problem is reported, not just the first, and any error fails the run (exit 1). Checks: unique kebab-case ids; every fact has a known source, a confidence and a status, and `verified`/`corrected` need a source read in full; segments join nodes on their own street, along the grid for `ns`/`ew` streets; LION ids are 7 digits; stub streets have no segments and every other street has one; stations have entrances and the segment they're over; areas name known segments; a segment is in at most one zone, and a zone segment can't be `unmapped`; connections join two zones that both touch the node, at most one per zone pair and node; every zone is reachable through **open** connections; every zone segment is in exactly one map of its zone; maps are at most 96 tiles on a side; maps of one zone that share a node list it in a map connection, and every map is reachable within its zone; exactly one Dispatcher anchor; landmarks are `fictional: true` and used at one anchor at most. Warnings (no failure): a segment in no zone without an `unmapped` reason, zones sharing a node with neither an open nor a wall connection, zones or maps with no pickup/dropoff anchor, unused landmarks, uncited sources. It also lists every fact that isn't both verified and high confidence.
 
-**Verification task (before or during 6b, on a machine that can reach nyc.gov).** Download LION (DCP, release 25A or newer). Filter to the bounds and check the street order, Broadway's crossings at 73rd and 74th St, 37th Rd east of 74th, and the plaza segments against DOT's plaza page. For each fact checked, add a source with `access: read`, set `confidence`, and rerun `npm run validate:world` until the unverified list holds only what was deliberately left fuzzy.
+**Verification of 6a's 25 facts (6b, against LION 26C and the sources above).** All 25 checked; none left unverified.
+
+| 6a fact | 6a | 6b | Confidence | Source | Finding |
+|---------|----|----|------------|--------|---------|
+| streets `st-73`, `st-74`, `st-75`, `ave-37`, `rd-37`, `roosevelt` | high, unverified | verified | high | `dcp-lion` | Names and order match. |
+| street `broadway` | medium | corrected | high | `dcp-lion` | Meets 73rd St at the 37th Rd corner (one node), crosses Roosevelt between 73rd and 74th St, meets 74th and 75th St **south** of Roosevelt. |
+| `seg-37ave-73-74`, `seg-37ave-74-75`, `seg-73-37ave-37rd`, `seg-74-37ave-37rd`, `seg-75-37ave-37rd`, `seg-75-37rd-roosevelt`, `seg-roosevelt-74-75` | high/medium | verified | high | `dcp-lion` | Same ids kept. |
+| `seg-37rd-73-74` (plaza) | high | verified | high | `dcp-lion`, `dot-ped-plazas` | LION FeatureTyp W / TrafDir P; DOT's Diversity Plaza polygon is exactly 37th Rd, 73rd–74th St. |
+| `seg-37rd-74-75` (low: does 37th Rd go east of 74th?) | low | verified | high | `dcp-lion` | **Yes.** It runs on to 77th St and ends there. |
+| `seg-roosevelt-73-74` | high | corrected | high | `dcp-lion` | Split at the Broadway crossing: `seg-roosevelt-73-bway`, `seg-roosevelt-bway-74`. |
+| `seg-73-37rd-bway` | medium | removed | — | `dcp-lion` | Zero length: 73rd St, 37th Rd and Broadway meet at one node. |
+| `seg-73-bway-roosevelt` (plaza) | medium | verified | high | `dcp-lion` | Pedestrian-only in LION; now `seg-73-37rd-roosevelt`. Not in DOT's plaza polygon. |
+| `seg-74-37rd-bway` | medium | corrected | high | `dcp-lion` | Broadway doesn't cross 74th St north of Roosevelt: `seg-74-37rd-roosevelt`. |
+| `seg-74-bway-roosevelt` | medium | corrected | high | `dcp-lion` | South of Roosevelt: `seg-74-roosevelt-bway`. |
+| `seg-75-37ave-37rd` | medium | verified | high | `dcp-lion` | |
+| `seg-bway-73-74` | medium | corrected | high | `dcp-lion` | `seg-bway-73-roosevelt` + `seg-bway-roosevelt-74`. |
+| `seg-bway-74-75` | medium | corrected | high | `dcp-lion` | Ends at 75th St south of Roosevelt, not at Roosevelt / 75th. |
+| transit `elevated-7` | high | verified | high | `mta-stations`, `dcp-lion` | Extended to 90th St. |
+| transit `station-74st` | medium | corrected | high | `mta-stations`, `mta-entrances` | Stairs at 73rd St / 37th Rd, 74th St / 37th Rd, Broadway / 74th St, Broadway / 75th St; three station houses mid-block (between Roosevelt Ave, 74th St, Broadway and 75th St). 6a listed 74th and 75th St at Roosevelt. |
+
+6a's open warning on node `n-73-bway` is gone with the node itself (it merged into `n-73-37rd`).
+
+**Second-pass check (6b).** An independent script, kept out of the repo because it reads the raw LION extract in `logs/`, re-walked every segment's LION ids from its `from` node to its `to` node, checked each node's LION id against its streets, compared `use` with LION's pedestrian codes, and recomputed the Historic District membership from the LPC polygon (53 of 53 segments match). It found one error, now fixed: `seg-78-34ave-northern` (the 78th Street Plaza) was `road`; it is `plaza`, with LION's short street piece by Northern Blvd noted.
+
+**Current state (6b).** 30 streets (5 of them stubs), 74 nodes, 120 segments (106 in zones, 14 `unmapped`), the elevated 7 and 3 stations (74 St-Broadway / Jackson Hts-Roosevelt Av, 82 St-Jackson Hts, 90 St-Elmhurst Av: every 7 station inside the bounds), 6 areas, 4 zones, 23 zone connections (8 open, 15 wall), 11 proposed maps with 9 map connections, 25 anchors (24 delivery, 1 Dispatcher), 11 fictional landmarks, 11 sources. `validate:world`: 0 errors, 0 warnings. 12 facts are verified but medium confidence: the ten 34th Ave segments (LION codes them as a one-way street, while DOT lists a "34th Avenue Plaza" from 69th to 94th St) and two areas (34th Avenue Plaza; the Pride route's west end, below).
+
+**Zones (6b; extents Claude's proposal within the owner's four zones).**
+
+| Zone | Extent | Sources |
+|------|--------|---------|
+| `diversity-plaza-74th` | 73rd–77th St from 37th Ave to Roosevelt Ave; all of 37th Rd (73rd–77th St); pedestrian 37th Rd (73rd–74th) and 73rd St (37th Rd–Roosevelt); Roosevelt 73rd–74th St under the el; the station triangle south of Roosevelt (74th St, Broadway, 75th St). | LION, DOT plazas, MTA |
+| `roosevelt-ave` | Roosevelt Ave 74th–90th St under the elevated 7, with the mouths of Baxter Ave, Forley St, Elbertson St, Britton Ave and Case St from the south; 82 St and 90 St stations. | LION, MTA |
+| `ave-37` | 37th Ave 73rd–90th St, plus 89th St from 37th Ave to Roosevelt (parade formation street and a link to Roosevelt). Pride route: 37th Ave from 89th St west to 75th St (2026 DOT closures); the NYPD 2023 advisory lists 79th–89th St but disperses at 75th St, so the west end is medium confidence. | LION, NYPD, CBS/DOT |
+| `historic-district` | 77th–88th St between 37th Ave and 34th Ave (35th and 34th Ave included), plus Travers Park's frontage (34th Ave 77th–78th St) and the 78th Street Plaza to Northern Blvd. | LPC, LION, Parks, DOT plazas |
+
+The LPC boundary (LP-01831, designated 1993-10-19) is recorded as `area-jh-historic-district`: segments with at least half their length inside the polygon. It also covers the north side of Roosevelt Ave around 79th–85th St and, under half of each street, parts of the blocks north of 34th Ave at 81st–82nd St. The cross streets between 37th Ave and Roosevelt (78th–88th and 90th St) are `unmapped` for now (Claude's choice): each would make a zone seam, and 6c can promote some of them to links. 89th St between 35th and 37th Ave (the north half of the formation street) is `unmapped` too, to keep the `ave-37` maps short. Travers Park is just outside the LPC polygon; it is in the `historic-district` zone as an adjacent real public place (Claude's choice).
+
+**Zone connections (proposed).** Open: Diversity Plaza ↔ Roosevelt at 74th and 77th St; Diversity Plaza ↔ 37th Ave at 74th and 75th St; 37th Ave ↔ Roosevelt at 89th St; 37th Ave ↔ Historic District at 78th, 82nd and 86th St. Every other shared node is a wall (15).
+
+**Map split plan for 6c (proposed).** Scale: 16 tiles per east–west block (about 80 m, so roughly 5 m a tile, one screen width per block); 24 tiles per long north–south block (220–235 m, compressed about 2×); 8 tiles for the short 37th Rd to Roosevelt block; 12–14 tiles for a street corridor (storefronts, sidewalks, roadway). Cap: 96 tiles on the long side (6 screens), enforced by the validator.
+
+| Map id | Zone | Covers | Tiles (w × h) | Joins (same zone) |
+|--------|------|--------|---------------|-------------------|
+| `diversity-plaza-74th` | diversity-plaza-74th | 73rd–77th St, 37th Ave to the station triangle | 72 × 56 | — |
+| `roosevelt-ave` | roosevelt-ave | Roosevelt 74th–79th St | 80 × 14 | `roosevelt-ave-79-84` at 79th St |
+| `roosevelt-ave-79-84` | roosevelt-ave | Roosevelt 79th–84th St, 82 St station | 80 × 14 | both neighbours, at 79th and 84th St |
+| `roosevelt-ave-84-90` | roosevelt-ave | Roosevelt 84th–90th St, 90 St station | 96 × 14 | `roosevelt-ave-79-84` at 84th St |
+| `ave-37` | ave-37 | 37th Ave 73rd–79th St | 96 × 14 | `ave-37-79-84` at 79th St |
+| `ave-37-79-84` | ave-37 | 37th Ave 79th–84th St | 80 × 14 | both neighbours, at 79th and 84th St |
+| `ave-37-84-90` | ave-37 | 37th Ave 84th–90th St, 89th St down to Roosevelt | 96 × 40 | `ave-37-79-84` at 84th St |
+| `historic-district` | historic-district | 77th–82nd St, 35th Ave (incl.) to 37th Ave | 80 × 40 | `-82-88` and `-north-82-88` at 82nd St / 35th Ave; `-north` along 35th Ave (77th–81st St) |
+| `historic-district-82-88` | historic-district | 82nd–88th St, 35th Ave (incl.) to 37th Ave | 96 × 40 | `historic-district` at 82nd St / 35th Ave; `-north-82-88` along 35th Ave (82nd–88th St) |
+| `historic-district-north` | historic-district | 77th–82nd St, 34th to 35th Ave, Travers Park, 78th Street Plaza | 80 × 64 | `historic-district` along 35th Ave; `-north-82-88` at 82nd St / 34th Ave |
+| `historic-district-north-82-88` | historic-district | 82nd–88th St, 34th to 35th Ave | 96 × 40 | `historic-district-82-88` along 35th Ave; `-north` at 82nd St / 34th Ave; `historic-district` at the 82nd St / 35th Ave corner |
+
+Map ids `roosevelt-ave` and `diversity-plaza-74th` keep the session 4 stub ids, so string IDs and the warp registry keep working. Zone connections land in whichever map of each zone touches the node. The full segment lists per map are in the dataset.
+
+**Anchors and landmarks (proposed).** 24 delivery anchors, at least two in every map, and the Dispatcher's (`rav-dispatch`, Roosevelt 74th–75th St, north side, by the 74 St station). 11 fictional landmark slots (shops, food stalls, service counters, letters A–K), no real businesses. Historic District anchors sit on plain block faces with no building names; residential blocks stay generic.
 
 ---
 
@@ -348,8 +422,9 @@ Each session should produce one small, testable result and end with a report.
 | **3** ✅ | Talk to someone + Tiled pipeline | Strings JSON and `t()` (also setting `<title>` and `lang`); EarthBound-style text window (typewriter text, original or open-licence pixel font); NPCs placed from Tiled objects; action button checks the faced tile; y-sorted depth. Tiled pipeline: a real or exported tileset PNG at `public/assets/tilesets/tiles.png`, a verified Tiled open-and-save round trip, and an object-layer convention for NPCs. |
 | **4** ✅ | Font, zones and travel | Spleen 6x12 font (Latin-1). `above` tile layer. Map registry, warp and spawn objects in Tiled, fade transitions with input lock. Two disposable stub zones (`roosevelt-ave`, `diversity-plaza-74th`) connected to the test map; a world dataset replaces their layouts later. |
 | **5** ✅ | Delivery loop v1 | Order data model (JSON): pickup, dropoff, item, reward. Accept, pick up and deliver flow; on-screen order ticket. Orders send the player across zones. |
-| **6a** ✅ | World dataset (data only) | Source and licence decision (hand-drawn from NYC city data, not OSM). Bounds: Roosevelt Ave 73rd–75th St, 74th St / Diversity Plaza, to 37th Ave. Dataset schema, `src/data/world/jackson-heights.json`, validator and tests (2.14). No game changes. |
-| **6b** | World maps | Verify the dataset against LION (2.14). Generator or documented hand process from dataset to Tiled maps; replace `roosevelt-ave` and `diversity-plaza-74th`, add `ave-37`; decide the test map's fate; move the Dispatcher to its anchor; re-point orders at the new pointIds; rewrite the layout-bound checks (P2, Q4, Q6c, live-check route, touch-check order). |
+| **6a** ✅ | World dataset (data only) | Source and licence decision (hand-drawn from NYC city data, not OSM). Dataset schema, `src/data/world/jackson-heights.json` (first pass, Roosevelt Ave 73rd–75th St; widened to all four zones by the 6b brief), validator and tests (2.14). No game changes. |
+| **6b** ✅ | Verify and expand the world dataset (data only) | PR #1 merged. Every 6a fact checked against LION 26C and the LPC, DOT, Parks and MTA datasets (Broadway corrected, 37th Rd confirmed east of 74th St). All four locked zones at their real extent, every elevated-7 station in the bounds, areas (Historic District, plazas, Travers Park, Pride route), open/wall connections, a proposed 11-map split plan, 24 anchors + the Dispatcher's, 11 fictional landmark slots. Validator schema v2 and 15 tests. README credits for the NYC data. No game changes (2.14). |
+| **6c** | World maps | Generator or documented hand process from the dataset to the 11 Tiled maps in the split plan; replace the `roosevelt-ave` and `diversity-plaza-74th` stubs and add the other nine; decide the test map's fate; move the Dispatcher to `rav-dispatch`; re-point orders at the new pointIds; rewrite the layout-bound checks (P2, Q4, Q6c, the live-check route, the touch-check order). Decide how to draw 34th Ave (street or plaza) and which `unmapped` cross streets become links. |
 | **7** | Saves and title | Versioned localStorage saves, autosave on zone change or delivery, title screen with Continue/New, settings stub (text speed). |
 | **8** | Battle system v1 | Encounter trigger; first-person menu battle scene; rolling HP counter; fictional gentrification-themed enemies from JSON; basic attack, defend and flee commands with original labels. |
 | **9** | Organizing moves and progression | Tenant-organizing specials (rent strike, petition, block party), a resource meter, XP and levels, status effects, balance pass. |

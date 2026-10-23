@@ -103,7 +103,7 @@ src/
     orders.json            delivery orders: pickup, dropoff, item, reward, string IDs
     maps/index.json        map registry: id, file, display-name string ID; start point
     maps/*.json            Tiled maps (30x20), saved by Tiled 1.12: test-map, roosevelt-ave, diversity-plaza-74th
-    world/jackson-heights.json  world dataset: streets, zones, connections, anchors, sources (not loaded by the game yet; DESIGN.md 2.14)
+    world/jackson-heights.json  world dataset: streets, zones, map split plan, anchors, sources (not loaded by the game yet; DESIGN.md 2.14)
 public/assets/tilesets/    tiles.png + overhead.png: placeholder tilesets exported for Tiled (see Editing maps)
 public/assets/fonts/spleen-6x12.png  font atlas, generated from the BDF (third-party, BSD-2-Clause)
 third_party/spleen-2.2.0/  Spleen 6x12 BDF and LICENSE, unmodified from the 2.2.0 release (SOURCE.txt)
@@ -149,6 +149,17 @@ When Phaser, the font or other dependencies change, update that file. Check the 
 ```bash
 grep -nE "ISC License|Redistribution and use|Copyright \(c\)|@license" node_modules/phaser/dist/phaser.esm.js | grep -v "Phaser Studio"
 ```
+
+### World data
+
+The street layout is hand-drawn using public NYC data as a reference only. `src/data/world/jackson-heights.json` records facts (street names, which streets meet, their order, pedestrian-only blocks, station corners) and the LION ids they came from, not copied geometry or coordinates. Sources, all accessed 2026-10-23:
+
+- **LION** single line street base map, release 26C (August 2026), NYC Department of City Planning (BYTES of the BIG APPLE). Provided for informational purposes only; DCP makes no warranty of completeness, accuracy or fitness for any purpose.
+- **Historic Districts**, NYC Landmarks Preservation Commission; **Pedestrian Plazas**, NYC Department of Transportation; **Parks Properties**, NYC Department of Parks and Recreation. All via NYC Open Data, which has no restrictions on use.
+- **Subway Stations** and **Subway Entrances and Exits: 2024**, Metropolitan Transportation Authority, via data.ny.gov (OPEN-NY Terms of Use).
+- Queens Pride Parade route: NYPD traffic advisory (June 2023) and NYC DOT's 2026 closures as reported by CBS New York.
+
+This game isn't endorsed by the City of New York, its agencies, the State of New York or the MTA. The layout is simplified and stylized: don't use it for navigation. Exact URLs and versions are in the dataset's `sources` and in [`docs/DESIGN.md` §2.14](docs/DESIGN.md#214-world-dataset-sessions-6a-6b).
 
 ## Editing maps
 
