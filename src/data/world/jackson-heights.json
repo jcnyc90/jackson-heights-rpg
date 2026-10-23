@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "id": "jackson-heights",
+  "bounds": {
+    "description": "First pass: Roosevelt Ave from 73rd to 75th St, 74th St / Diversity Plaza, north to 37th Ave. Widen later.",
+    "streets": ["st-73", "st-74", "st-75"],
+    "avenues": ["ave-37", "rd-37", "roosevelt"]
+  },
+  "sources": [
+    {
+      "id": "nyc-opendata-faq",
+      "role": "licence",
+      "title": "NYC Open Data FAQ (no restrictions on use of Open Data)",
+      "url": "https://opendata.cityofnewyork.us/faq/",
+      "publisher": "City of New York",
+      "accessed": "2026-10-23",
+      "access": "search-summary",
+      "usedFor": "Licence: NYC Open Data has no usage restrictions; the Terms of Use may require naming the source and modifications."
+    },
+    {
+      "id": "nyc-terms",
+      "role": "licence",
+      "title": "NYC DataPortal Terms of Use",
+      "url": "https://www.nyc.gov/html/data/terms.html",
+      "publisher": "City of New York",
+      "accessed": "2026-10-23",
+      "access": "search-summary",
+      "usedFor": "Licence: no warranty; apps may need to identify source, version and modifications, and show a disclaimer."
+    },
+    {
+      "id": "dcp-lion",
+      "title": "LION Single Line Street Base Map",
+      "url": "https://www.nyc.gov/site/planning/data-maps/open-data/dwn-lion.page",
+      "publisher": "NYC Department of City Planning",
+      "accessed": "2026-10-23",
+      "access": "not-downloaded",
+      "usedFor": "Intended reference for street geometry. Not yet downloaded: the session 6a container could not reach nyc.gov. Verification task in DESIGN.md 2.14."
+    },
+    {
+      "id": "nyc-cecm-diversity-plaza",
+      "title": "Diversity Plaza (event permitting page)",
+      "url": "https://www.nyc.gov/site/cecm/permitting/diversity-plaza.page",
+      "publisher": "NYC Citywide Event Coordination and Management",
+      "accessed": "2026-10-23",
+      "access": "search-summary",
+      "usedFor": "Plaza location: 37th Road between 73rd and 74th Street."
+    },
+    {
+      "id": "dot-diversity-plaza-2015",
+      "title": "Diversity Plaza, presentation to Queens Community Board 3 (May 2015)",
+      "url": "https://www.nyc.gov/html/dot/downloads/pdf/2015-05-diversity-plaza-cb3.pdf",
+      "publisher": "NYC Department of Transportation",
+      "accessed": "2026-10-23",
+      "access": "search-summary",
+      "usedFor": "Plaza extent: 37th Road between Broadway and 74th Street, and 73rd Street between Broadway and Roosevelt Avenue. Attributed by the search summary to a DOT project page; this PDF is the likeliest match, not confirmed."
+    },
+    {
+      "id": "wiki-74st-station",
+      "title": "Jackson Heights-Roosevelt Avenue/74th Street station",
+      "url": "https://en.wikipedia.org/wiki/Jackson_Heights%E2%80%93Roosevelt_Avenue/74th_Street_station",
+      "publisher": "Wikipedia",
+      "accessed": "2026-10-23",
+      "access": "search-summary",
+      "usedFor": "Station complex in the triangle of 74th St, Broadway and Roosevelt Ave; elevated 7 platform plus underground Roosevelt Ave platforms; exits at Broadway and 73rd, 74th and 75th St, and at 73rd St and 37th Rd."
+    },
+    {
+      "id": "mta-7-line-map",
+      "title": "7 Train (Flushing Local and Express) Line Map",
+      "url": "https://www.mta.info/maps/subway-line-maps/7-line",
+      "publisher": "MTA",
+      "accessed": "2026-10-23",
+      "access": "search-summary",
+      "usedFor": "Station entrances: Roosevelt Ave and Broadway, 74 St and Roosevelt Ave."
+    },
+    {
+      "id": "streeteasy-73-17-37rd",
+      "title": "73-17 37th Road, Jackson Heights (building listing)",
+      "url": "https://streeteasy.com/building/73_17-37-road-jackson_heights",
+      "publisher": "StreetEasy",
+      "accessed": "2026-10-23",
+      "access": "search-summary",
+      "usedFor": "37th Road exists on the 73rd-74th St block (Queens hyphenated address 73-17)."
+    },
+    {
+      "id": "queens-grid",
+      "title": "Queens street grid convention (general knowledge)",
+      "url": "",
+      "publisher": "",
+      "accessed": "2026-10-23",
+      "access": "general-knowledge",
+      "usedFor": "Numbered streets run north-south and rise to the east; a Road lies just south of the Avenue with the same number; Roosevelt Ave runs east-west under the elevated 7 train. Must be checked against LION."
+    }
+  ],
+  "streets": [
+    { "id": "st-73", "name": "73rd Street", "orientation": "ns", "sources": ["queens-grid", "wiki-74st-station"], "confidence": "high" },
+    { "id": "st-74", "name": "74th Street", "orientation": "ns", "sources": ["queens-grid", "wiki-74st-station"], "confidence": "high" },
+    { "id": "st-75", "name": "75th Street", "orientation": "ns", "sources": ["queens-grid", "wiki-74st-station"], "confidence": "high" },
+    { "id": "ave-37", "name": "37th Avenue", "orientation": "ew", "sources": ["queens-grid"], "confidence": "high" },
+    { "id": "rd-37", "name": "37th Road", "orientation": "ew", "sources": ["queens-grid", "streeteasy-73-17-37rd", "nyc-cecm-diversity-plaza"], "confidence": "high" },
+    { "id": "roosevelt", "name": "Roosevelt Avenue", "orientation": "ew", "sources": ["queens-grid", "wiki-74st-station"], "confidence": "high" },
+    { "id": "broadway", "name": "Broadway", "orientation": "diagonal", "sources": ["wiki-74st-station", "dot-diversity-plaza-2015"], "confidence": "medium", "notes": "Runs north-west to south-east through the bounds, from 73rd St just south of 37th Rd to Roosevelt Ave at 75th St. Inferred from station exits and the plaza description; check the angle and crossing points against LION." }
+  ],
+  "nodes": [
+    { "id": "n-73-37ave", "streets": ["st-73", "ave-37"], "grid": [0, 0] },
+    { "id": "n-74-37ave", "streets": ["st-74", "ave-37"], "grid": [1, 0] },
+    { "id": "n-75-37ave", "streets": ["st-75", "ave-37"], "grid": [2, 0] },
+    { "id": "n-73-37rd", "streets": ["st-73", "rd-37"], "grid": [0, 1] },
+    { "id": "n-74-37rd", "streets": ["st-74", "rd-37"], "grid": [1, 1] },
+    { "id": "n-75-37rd", "streets": ["st-75", "rd-37"], "grid": [2, 1] },
+    { "id": "n-73-bway", "streets": ["st-73", "broadway"], "grid": [0, 1.25] },
+    { "id": "n-74-bway", "streets": ["st-74", "broadway"], "grid": [1, 1.6] },
+    { "id": "n-73-roosevelt", "streets": ["st-73", "roosevelt"], "grid": [0, 2] },
+    { "id": "n-74-roosevelt", "streets": ["st-74", "roosevelt"], "grid": [1, 2] },
+    { "id": "n-75-roosevelt", "streets": ["st-75", "roosevelt", "broadway"], "grid": [2, 2] }
+  ],
+  "segments": [
+    { "id": "seg-37ave-73-74", "street": "ave-37", "from": "n-73-37ave", "to": "n-74-37ave", "use": "road", "sources": ["queens-grid"], "confidence": "high" },
+    { "id": "seg-37ave-74-75", "street": "ave-37", "from": "n-74-37ave", "to": "n-75-37ave", "use": "road", "sources": ["queens-grid"], "confidence": "high" },
+    { "id": "seg-37rd-73-74", "street": "rd-37", "from": "n-73-37rd", "to": "n-74-37rd", "use": "plaza", "sources": ["nyc-cecm-diversity-plaza", "dot-diversity-plaza-2015"], "confidence": "high", "notes": "Diversity Plaza: closed to cars, pedestrian plaza." },
+    { "id": "seg-37rd-74-75", "street": "rd-37", "from": "n-74-37rd", "to": "n-75-37rd", "use": "road", "sources": ["queens-grid"], "confidence": "low", "notes": "Not confirmed that 37th Rd continues east of 74th St. Check LION." },
+    { "id": "seg-roosevelt-73-74", "street": "roosevelt", "from": "n-73-roosevelt", "to": "n-74-roosevelt", "use": "road", "overhead": "elevated-7", "sources": ["queens-grid", "wiki-74st-station"], "confidence": "high" },
+    { "id": "seg-roosevelt-74-75", "street": "roosevelt", "from": "n-74-roosevelt", "to": "n-75-roosevelt", "use": "road", "overhead": "elevated-7", "sources": ["queens-grid", "wiki-74st-station"], "confidence": "high" },
+    { "id": "seg-73-37ave-37rd", "street": "st-73", "from": "n-73-37ave", "to": "n-73-37rd", "use": "road", "sources": ["queens-grid"], "confidence": "high" },
+    { "id": "seg-73-37rd-bway", "street": "st-73", "from": "n-73-37rd", "to": "n-73-bway", "use": "road", "sources": ["wiki-74st-station"], "confidence": "medium" },
+    { "id": "seg-73-bway-roosevelt", "street": "st-73", "from": "n-73-bway", "to": "n-73-roosevelt", "use": "plaza", "sources": ["dot-diversity-plaza-2015"], "confidence": "medium", "notes": "Part of Diversity Plaza per the DOT description." },
+    { "id": "seg-74-37ave-37rd", "street": "st-74", "from": "n-74-37ave", "to": "n-74-37rd", "use": "road", "sources": ["queens-grid"], "confidence": "high" },
+    { "id": "seg-74-37rd-bway", "street": "st-74", "from": "n-74-37rd", "to": "n-74-bway", "use": "road", "sources": ["queens-grid", "wiki-74st-station"], "confidence": "medium" },
+    { "id": "seg-74-bway-roosevelt", "street": "st-74", "from": "n-74-bway", "to": "n-74-roosevelt", "use": "road", "sources": ["wiki-74st-station"], "confidence": "medium", "notes": "West side of the station triangle." },
+    { "id": "seg-75-37ave-37rd", "street": "st-75", "from": "n-75-37ave", "to": "n-75-37rd", "use": "road", "sources": ["queens-grid"], "confidence": "medium" },
+    { "id": "seg-75-37rd-roosevelt", "street": "st-75", "from": "n-75-37rd", "to": "n-75-roosevelt", "use": "road", "sources": ["queens-grid", "wiki-74st-station"], "confidence": "medium" },
+    { "id": "seg-bway-73-74", "street": "broadway", "from": "n-73-bway", "to": "n-74-bway", "use": "road", "sources": ["wiki-74st-station", "dot-diversity-plaza-2015"], "confidence": "medium" },
+    { "id": "seg-bway-74-75", "street": "broadway", "from": "n-74-bway", "to": "n-75-roosevelt", "use": "road", "sources": ["wiki-74st-station"], "confidence": "medium", "notes": "North side of the station triangle." }
+  ],
+  "transit": [
+    {
+      "id": "elevated-7",
+      "kind": "elevated-line",
+      "name": "7 train (elevated)",
+      "segments": ["seg-roosevelt-73-74", "seg-roosevelt-74-75"],
+      "sources": ["wiki-74st-station", "mta-7-line-map"],
+      "confidence": "high"
+    },
+    {
+      "id": "station-74st",
+      "kind": "station",
+      "name": "Jackson Heights-Roosevelt Av / 74 St-Broadway",
+      "entrances": ["n-73-37rd", "n-73-bway", "n-74-bway", "n-74-roosevelt", "n-75-roosevelt"],
+      "sources": ["wiki-74st-station", "mta-7-line-map"],
+      "confidence": "medium",
+      "notes": "Sources disagree on the exact entrance count; these are the corners at least two of them name. Entrances become scenery, not warps."
+    }
+  ],
+  "zones": [
+    {
+      "id": "roosevelt-ave",
+      "name": "Roosevelt Avenue",
+      "summary": "Roosevelt Ave under the elevated 7, 73rd to 75th St, with the station triangle.",
+      "segments": ["seg-roosevelt-73-74", "seg-roosevelt-74-75", "seg-74-bway-roosevelt", "seg-bway-73-74", "seg-bway-74-75"]
+    },
+    {
+      "id": "diversity-plaza-74th",
+      "name": "Diversity Plaza",
+      "summary": "Diversity Plaza (37th Rd and the 73rd St plaza segment) and 74th St from Broadway north to 37th Ave.",
+      "segments": ["seg-37rd-73-74", "seg-73-37rd-bway", "seg-73-bway-roosevelt", "seg-74-37ave-37rd", "seg-74-37rd-bway"]
+    },
+    {
+      "id": "ave-37",
+      "name": "37th Avenue",
+      "summary": "37th Ave, 73rd to 75th St, with 73rd St down to 37th Rd. Edge of the first pass; the 37th Ave / Pride route zone grows from here.",
+      "segments": ["seg-37ave-73-74", "seg-37ave-74-75", "seg-73-37ave-37rd"]
+    }
+  ],
+  "connections": [
+    { "id": "conn-plaza-roosevelt-73", "zones": ["diversity-plaza-74th", "roosevelt-ave"], "at": "n-73-roosevelt", "notes": "The 73rd St plaza segment opens onto Roosevelt Ave." },
+    { "id": "conn-plaza-roosevelt-74", "zones": ["diversity-plaza-74th", "roosevelt-ave"], "at": "n-74-bway" },
+    { "id": "conn-plaza-37ave-74", "zones": ["diversity-plaza-74th", "ave-37"], "at": "n-74-37ave" },
+    { "id": "conn-plaza-37ave-73", "zones": ["diversity-plaza-74th", "ave-37"], "at": "n-73-37rd" }
+  ],
+  "anchors": [
+    { "id": "rav-north-1", "zone": "roosevelt-ave", "segment": "seg-roosevelt-73-74", "side": "north", "t": 0.5, "uses": ["pickup", "dropoff"], "landmark": "lm-shop-a" },
+    { "id": "rav-south-1", "zone": "roosevelt-ave", "segment": "seg-roosevelt-74-75", "side": "south", "t": 0.5, "uses": ["pickup", "dropoff"] },
+    { "id": "rav-dispatch", "zone": "roosevelt-ave", "segment": "seg-roosevelt-74-75", "side": "north", "t": 0.25, "uses": ["dispatcher"], "notes": "Where the Dispatcher stands, near the station triangle." },
+    { "id": "plaza-west-1", "zone": "diversity-plaza-74th", "segment": "seg-73-37rd-bway", "side": "west", "t": 0.5, "uses": ["pickup", "dropoff"] },
+    { "id": "plaza-74-1", "zone": "diversity-plaza-74th", "segment": "seg-74-37ave-37rd", "side": "east", "t": 0.5, "uses": ["pickup", "dropoff"], "landmark": "lm-shop-b" },
+    { "id": "ave37-north-1", "zone": "ave-37", "segment": "seg-37ave-74-75", "side": "north", "t": 0.5, "uses": ["pickup", "dropoff"] },
+    { "id": "ave37-south-1", "zone": "ave-37", "segment": "seg-37ave-73-74", "side": "south", "t": 0.5, "uses": ["pickup", "dropoff"], "landmark": "lm-shop-c" }
+  ],
+  "landmarks": [
+    { "id": "lm-shop-a", "zone": "roosevelt-ave", "kind": "shop", "fictional": true, "placeholder": "Shop A (fictional placeholder)" },
+    { "id": "lm-shop-b", "zone": "diversity-plaza-74th", "kind": "shop", "fictional": true, "placeholder": "Shop B (fictional placeholder)" },
+    { "id": "lm-shop-c", "zone": "ave-37", "kind": "shop", "fictional": true, "placeholder": "Shop C (fictional placeholder)" }
+  ]
+}
