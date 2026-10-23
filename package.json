@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "validate:world": "node scripts/validate-world.mjs",
+    "test:world": "node --test tests/world/validate-world.test.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

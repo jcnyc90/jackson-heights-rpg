@@ -12,7 +12,7 @@ This document has three parts:
 2. **Technical conventions:** set in session 1 to keep future work cheap. They're cheap to change now and get more expensive later.
 3. **Roadmap and open questions.**
 
-Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1. Section 2.11 covers dialogue and NPCs (session 3), 2.12 maps, warps and zones (session 4), and 2.13 the delivery loop (session 5).
+Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1. Section 2.11 covers dialogue and NPCs (session 3), 2.12 maps, warps and zones (session 4), 2.13 the delivery loop (session 5), and 2.14 the world dataset (session 6a).
 
 ---
 
@@ -177,10 +177,11 @@ The player's collision box (`PLAYER_FEET`, 10×8) is centred at the bottom of th
 - **Pixel-perfect scaling:** `Scale.FIT` can produce non-integer scale factors (see 2.2).
 - **No Content Security Policy:** GitHub Pages can't send headers. A `<meta>` CSP is possible once there's any dynamic content.
 - **No Canvas fallback on rare GPUs:** see 2.10.
-- **Font covers Latin-1 only:** ASCII and Latin-1 (é, ñ, ü, ¿, ¡). No curly quotes, em dashes or ellipsis yet (Spleen has them; the atlas doesn't), and no non-Latin scripts (roadmap 14+).
-- **Text window speed is fixed** at 30 characters/s; a text-speed setting belongs to the settings work (roadmap session 6).
+- **Font covers Latin-1 only:** ASCII and Latin-1 (é, ñ, ü, ¿, ¡). No curly quotes, em dashes or ellipsis yet (Spleen has them; the atlas doesn't), and no non-Latin scripts (roadmap 15+).
+- **Text window speed is fixed** at 30 characters/s; a text-speed setting belongs to the settings work (roadmap session 7).
 - **Tiles don't y-sort:** sprites sort by feet y; `obstacles` tiles draw under every sprite and `above` tiles over every sprite. That covers trees and awnings. Anything that must be in front of some sprites and behind others at the same spot (e.g. a lamp post a player walks around on both sides) still needs a sprite, not a tile.
 - **Map display name card** is plain text on a dark box, drawn by `MapScene` for 1.5 s after a warp. Placeholder UI.
+- **World dataset is unverified:** every fact in `src/data/world/jackson-heights.json` came from web-search summaries, not LION. Verify before 6b builds maps from it (2.14).
 - **Order ticket** is plain text on a dark box (placeholder UI, like the name card). It's sized to its text: a map name longer than about 30 characters makes it wider than the 4:3 safe area checked by touch-check.js (2.13).
 - **Delivery state is in memory only:** a reload loses the active order and the reward total. Saves come later.
 - **The tileset PNG is a copy** of generated art. H6 guards drift; it goes away when real tiles replace the placeholder.
@@ -306,6 +307,34 @@ The Dispatcher's own `dialogueId` lines come first, then the order line. NPCs co
 
 The Dispatcher stands on the test map's south-east sidewalk at (440, 288), outside every session 1–4 render shot and walk.
 
+### 2.14 World dataset (session 6a)
+
+The real geography the maps will be built from, kept as data: `src/data/world/jackson-heights.json`. The game doesn't load it yet. Session 6b turns it into Tiled maps. Check it with `npm run validate:world` (the validator, `scripts/validate-world.mjs`) and `npm run test:world` (its tests).
+
+**Bounds (first pass).** Roosevelt Ave from 73rd to 75th St; 74th St / Diversity Plaza; north to 37th Ave. Widen later by adding streets, nodes and segments; nothing in the schema assumes these bounds.
+
+**Source and licence decision (owner, session 6a).** The maps are hand-drawn, using NYC city data as a reference, not OpenStreetMap. Why not OSM: under ODbL the dataset JSON would be a derived database, which must stay under ODbL share-alike. That can't carry CC BY-NC-SA's non-commercial term. What the dataset holds is facts: street names, which streets meet, their order and rough angle, and which segments are plaza or under the elevated 7. Facts aren't copyrightable, and no third-party geometry is copied, so the file is ours and sits under CC BY-NC-SA with the rest of `src/data/**`. NYC Open Data has no use restrictions (FAQ; Local Law 11 of 2012). The Terms of Use say the City may require apps to name the source and modifications, and to show a disclaimer. If LION coordinates are ever copied into the repo, add a source and disclaimer line to the credits first.
+
+**Model.** An abstract grid, not coordinates. Distances are stylized; the generator (6b) picks tile sizes.
+
+| Collection | Fields | Becomes (6b) |
+|------------|--------|--------------|
+| `sources` | `id`, `title`, `url`, `publisher`, `accessed`, `access` (`read` / `search-summary` / `not-downloaded` / `general-knowledge`), `usedFor`, optional `role: licence` | Credits and this section |
+| `streets` | `id`, `name`, `orientation` (`ns`, `ew`, `diagonal`), `sources`, `confidence` | Street name signs, map names |
+| `nodes` | `id`, `streets` (2+), `grid: [x, y]` (x = 0 at 73rd St, +1 per street east; y = 0 at 37th Ave, +1 per avenue south; fractions for Broadway) | Intersections |
+| `segments` | `id`, `street`, `from`, `to` (nodes on that street), `use` (`road`, `plaza`), optional `overhead` (transit id), `sources`, `confidence` | Walkable street and plaza tiles |
+| `transit` | `id`, `kind`, `segments` or `entrances`, `sources`, `confidence` | El pillars and station entrances (scenery, not warps) |
+| `zones` | `id` (= map id), `name`, `summary`, `segments` | One Tiled map each |
+| `connections` | `id`, `zones` (exactly 2), `at` (a node both zones touch) | A warp pair plus spawns |
+| `anchors` | `id` (= `pointId`, unique across the dataset), `zone`, `segment`, `side`, `t` (0–1 along the segment), `uses` (`pickup`, `dropoff`, `dispatcher`), optional `landmark` | `deliveryPoint` objects; the Dispatcher's spot |
+| `landmarks` | `id`, `zone`, `kind`, `fictional: true` (required), `placeholder` | Fictional storefronts (fiction boundary, section 1 #5) |
+
+**Validation.** Every problem is reported, not just the first, and any error fails the run (exit 1). Checks: unique kebab-case ids; every fact has at least one known source and a confidence; segments join nodes on their own street, along the grid for `ns`/`ew` streets; a segment is in at most one zone; every zone is reachable through connections; each connection's node is on a segment of both zones; anchor sides fit the street's orientation; exactly one Dispatcher anchor; landmarks are `fictional: true`. Warnings (no failure): segments in no zone, zones sharing a node with no connection there, zones with no pickup/dropoff anchor, uncited sources. It also lists **unverified facts**: anything below `high` confidence, or not backed by at least one source read in full.
+
+**Current state.** 3 zones (`roosevelt-ave`, `diversity-plaza-74th`, `ave-37`), 7 streets, 11 nodes, 16 segments, 4 connections, 7 anchors (one is the Dispatcher's), 3 fictional landmarks, 9 sources. All 25 facts are unverified. The 6a session couldn't reach nyc.gov, NYC Open Data or Wikipedia (blocked from its container), so every source was read through web-search summaries. Lowest confidence: whether 37th Rd continues east of 74th St (`seg-37rd-74-75`, unowned) and Broadway's crossing points (`n-73-bway`, `n-74-bway`). Each zone keeps the id of the stub map it replaces, so map ids and string IDs don't change. `ave-37` is new.
+
+**Verification task (before or during 6b, on a machine that can reach nyc.gov).** Download LION (DCP, release 25A or newer). Filter to the bounds and check the street order, Broadway's crossings at 73rd and 74th St, 37th Rd east of 74th, and the plaza segments against DOT's plaza page. For each fact checked, add a source with `access: read`, set `confidence`, and rerun `npm run validate:world` until the unverified list holds only what was deliberately left fuzzy.
+
 ---
 
 ## 3. Roadmap
@@ -319,14 +348,16 @@ Each session should produce one small, testable result and end with a report.
 | **3** ✅ | Talk to someone + Tiled pipeline | Strings JSON and `t()` (also setting `<title>` and `lang`); EarthBound-style text window (typewriter text, original or open-licence pixel font); NPCs placed from Tiled objects; action button checks the faced tile; y-sorted depth. Tiled pipeline: a real or exported tileset PNG at `public/assets/tilesets/tiles.png`, a verified Tiled open-and-save round trip, and an object-layer convention for NPCs. |
 | **4** ✅ | Font, zones and travel | Spleen 6x12 font (Latin-1). `above` tile layer. Map registry, warp and spawn objects in Tiled, fade transitions with input lock. Two disposable stub zones (`roosevelt-ave`, `diversity-plaza-74th`) connected to the test map; a world dataset replaces their layouts later. |
 | **5** ✅ | Delivery loop v1 | Order data model (JSON): pickup, dropoff, item, reward. Accept, pick up and deliver flow; on-screen order ticket. Orders send the player across zones. |
-| **6** | Saves and title | Versioned localStorage saves, autosave on zone change or delivery, title screen with Continue/New, settings stub (text speed). |
-| **7** | Battle system v1 | Encounter trigger; first-person menu battle scene; rolling HP counter; fictional gentrification-themed enemies from JSON; basic attack, defend and flee commands with original labels. |
-| **8** | Organizing moves and progression | Tenant-organizing specials (rent strike, petition, block party), a resource meter, XP and levels, status effects, balance pass. |
-| **9–10** | Zone content | 37th Ave / Pride route, Historic District / co-op gardens, under-the-7 Roosevelt Ave. Community-informed writing and review for each represented community. |
-| **11** | Audio | Original music and SFX, mobile audio unlock, volume settings. |
-| **12** | Art pass | Real tilesets and sprites through the swap contract (2.3); title art. |
-| **13** | Polish and accessibility | Key remapping, text speed, reduced motion, contrast check, low-end Android performance, pseudo-locale test of string expansion. Lint and unit-test tooling if not added earlier. |
-| **14+** | Localization | First additional language. Needs fonts that cover the target scripts (e.g. Bengali, Devanagari, Tibetan). Pixel fonts for those are scarce; budget for this early. |
+| **6a** ✅ | World dataset (data only) | Source and licence decision (hand-drawn from NYC city data, not OSM). Bounds: Roosevelt Ave 73rd–75th St, 74th St / Diversity Plaza, to 37th Ave. Dataset schema, `src/data/world/jackson-heights.json`, validator and tests (2.14). No game changes. |
+| **6b** | World maps | Verify the dataset against LION (2.14). Generator or documented hand process from dataset to Tiled maps; replace `roosevelt-ave` and `diversity-plaza-74th`, add `ave-37`; decide the test map's fate; move the Dispatcher to its anchor; re-point orders at the new pointIds; rewrite the layout-bound checks (P2, Q4, Q6c, live-check route, touch-check order). |
+| **7** | Saves and title | Versioned localStorage saves, autosave on zone change or delivery, title screen with Continue/New, settings stub (text speed). |
+| **8** | Battle system v1 | Encounter trigger; first-person menu battle scene; rolling HP counter; fictional gentrification-themed enemies from JSON; basic attack, defend and flee commands with original labels. |
+| **9** | Organizing moves and progression | Tenant-organizing specials (rent strike, petition, block party), a resource meter, XP and levels, status effects, balance pass. |
+| **10–11** | Zone content | 37th Ave / Pride route, Historic District / co-op gardens, under-the-7 Roosevelt Ave. Community-informed writing and review for each represented community. |
+| **12** | Audio | Original music and SFX, mobile audio unlock, volume settings. |
+| **13** | Art pass | Real tilesets and sprites through the swap contract (2.3); title art. |
+| **14** | Polish and accessibility | Key remapping, text speed, reduced motion, contrast check, low-end Android performance, pseudo-locale test of string expansion. Lint and unit-test tooling if not added earlier. |
+| **15+** | Localization | First additional language. Needs fonts that cover the target scripts (e.g. Bengali, Devanagari, Tibetan). Pixel fonts for those are scarce; budget for this early. |
 
 ## 4. Open questions (not locked; owner's call)
 

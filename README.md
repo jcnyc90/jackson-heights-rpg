@@ -103,11 +103,14 @@ src/
     orders.json            delivery orders: pickup, dropoff, item, reward, string IDs
     maps/index.json        map registry: id, file, display-name string ID; start point
     maps/*.json            Tiled maps (30x20), saved by Tiled 1.12: test-map, roosevelt-ave, diversity-plaza-74th
+    world/jackson-heights.json  world dataset: streets, zones, connections, anchors, sources (not loaded by the game yet; DESIGN.md 2.14)
 public/assets/tilesets/    tiles.png + overhead.png: placeholder tilesets exported for Tiled (see Editing maps)
 public/assets/fonts/spleen-6x12.png  font atlas, generated from the BDF (third-party, BSD-2-Clause)
 third_party/spleen-2.2.0/  Spleen 6x12 BDF and LICENSE, unmodified from the 2.2.0 release (SOURCE.txt)
 scripts/build-font-atlas.mjs  BDF -> PNG atlas converter (no dependencies)
+scripts/validate-world.mjs    world dataset validator: npm run validate:world (no dependencies)
 tests/browser/             regression, render, touch and live-site checks
+tests/world/               validator tests: npm run test:world (node --test, no dependencies)
 public/THIRD-PARTY-NOTICES.txt  licences of bundled third-party code (served with the game)
 docs/DESIGN.md             locked decisions, conventions, Phaser 4 notes, roadmap
 LICENSE                    MIT (code)
