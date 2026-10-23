@@ -138,7 +138,7 @@
                         {
                          "name":"targetSpawn",
                          "type":"string",
-                         "value":"from-test-map"
+                         "value":"start"
                         }],
                  "rotation":0,
                  "type":"warp",
@@ -283,45 +283,6 @@
                  "width":0,
                  "x":56,
                  "y":304
-                }, 
-                {
-                 "height":0,
-                 "id":7,
-                 "name":"dispatcher",
-                 "opacity":1,
-                 "point":true,
-                 "properties":[
-                        {
-                         "name":"dialogueId",
-                         "type":"string",
-                         "value":"dispatcher.hello"
-                        }, 
-                        {
-                         "name":"facing",
-                         "type":"string",
-                         "value":"left"
-                        }, 
-                        {
-                         "name":"look",
-                         "type":"int",
-                         "value":0
-                        }, 
-                        {
-                         "name":"npcId",
-                         "type":"string",
-                         "value":"dispatcher"
-                        }, 
-                        {
-                         "name":"role",
-                         "type":"string",
-                         "value":"dispatcher"
-                        }],
-                 "rotation":0,
-                 "type":"npc",
-                 "visible":true,
-                 "width":0,
-                 "x":440,
-                 "y":288
                 }],
          "opacity":1,
          "type":"objectgroup",

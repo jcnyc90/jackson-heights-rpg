@@ -5,12 +5,17 @@
   "npc.neighbor-a.name": "Neighbor A",
   "npc.neighbor-b.name": "Neighbor B",
   "npc.neighbor-c.name": "Neighbor C",
-  "npc.neighbor-d.name": "Neighbor D",
-  "npc.neighbor-e.name": "Neighbor E",
 
   "map.test-map.name": "Test Map",
   "map.roosevelt-ave.name": "Roosevelt Avenue",
   "map.diversity-plaza-74th.name": "Diversity Plaza",
+  "map.roosevelt-ave-79-84.name": "Roosevelt at 82nd",
+  "map.roosevelt-ave-84-90.name": "Roosevelt at 87th",
+  "map.ave-37.name": "37th Avenue",
+  "map.ave-37-79-84.name": "37th Ave at 82nd",
+  "map.ave-37-84-90.name": "37th Ave at 87th",
+  "map.historic-district.name": "Historic District",
+  "map.historic-district-82-88.name": "Historic District East",
 
   "dialogue.neighbor-a.hello.1": "Hi there! I'm {name}.",
   "dialogue.neighbor-a.hello.2": "I'm only a placeholder for now. Real neighbors move in later.",
@@ -18,8 +23,6 @@
   "dialogue.neighbor-b.hello.2": "Press Action to finish a page early, then again to turn the page.",
   "dialogue.neighbor-c.hello.1": "{name} here. Nice weather today.",
   "dialogue.neighbor-c.font-test": "Font test: ¿Qué tal? ¡Sí! Mañana, pingüino, árbol, índice, ópera, último.",
-  "dialogue.neighbor-d.hello.1": "Hi, I'm {name}. This street is a rough placeholder for now.",
-  "dialogue.neighbor-e.hello.1": "Hello, I'm {name}. This plaza is a rough placeholder too.",
 
   "npc.dispatcher.name": "Dispatcher",
   "dialogue.dispatcher.hello.1": "I'm the {name}. I hand out delivery orders, one at a time.",

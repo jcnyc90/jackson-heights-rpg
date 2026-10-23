@@ -2,6 +2,9 @@
 // (strings, font, tileset export, dialogue, NPC targeting/collision, depth sorting).
 // N-P: session 4 (Spleen font, "above" tile layer, map registry, warps, fades, zones).
 // Q: session 5 (delivery orders: data checks, state machine, end to end across warps, order ticket).
+// S: session 6c (generated world maps: every map reachable from the start, every warp pair round-trips,
+// every delivery point reachable and facing-accessible). Since 6c every route on the world maps is
+// derived from map data (BFS over the collision grid), not hard-coded; A-O still run on test-map.
 // Deterministic: pauses Phaser's rAF loop and advances frames manually at exactly 60 fps via
 // game.step(time, delta), so results don't depend on the browser pane being visible.
 // Run on the dev server (needs the DEV-only window.game hook); see tests/browser/README.md.
@@ -14,6 +17,8 @@ const KC = { ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, KeyW: 87
 const ev = (type, code, o = {}) => window.dispatchEvent(new KeyboardEvent(type, { key: code, code, keyCode: KC[code], which: KC[code], bubbles: true, ...o }));
 const hold = (code, ms) => { ev('keydown', code); run(ms); ev('keyup', code); run(100); return [+s.player.x.toFixed(2), +s.player.y.toFixed(2)]; };
 const at = (x, y) => { s.player.body.reset(x, y); run(100); };
+// Since 6c the game starts on roosevelt-ave; A-O are written for test-map, so start there.
+s.scene.restart({ mapId: 'test-map', spawnId: 'start' }); run(100);
 const obstacles = s.children.list.find((o) => o.type === 'TilemapLayer' && o.layer.name === 'obstacles');
 const R = {}; const check = (name, actual, expected) => { R[name] = JSON.stringify(actual) === JSON.stringify(expected) ? 'PASS' : { FAIL: { actual, expected } }; };
 try {
@@ -285,16 +290,95 @@ try {
   // P. Map registry, warps, fades, zones
   const M = MAPS_MOD; const mapById = (id) => M.MAP_LIST.find((m) => m.id === id);
   const throwsMsg = (f) => { try { f(); return null; } catch (e) { return e.message; } };
-  check('P1 registry: 3 maps, files and display names resolve, every warp link valid',
+  const WORLD = (await import('/src/data/world/jackson-heights.json')).default;
+  const REAL = WORLD.maps.map((m) => m.id); // the generated world maps; test-map is a test-only fixture
+  check('P1 registry: test-map + the 9 world maps, files and display names resolve, every warp link valid, start on a world map',
     [M.MAP_LIST.map((m) => m.id), M.MAP_LIST.map((m) => STR_MOD.t(m.nameId)), throwsMsg(M.validateLinks), [M.START.map.id, M.START.spawn.spawnId]],
-    [['test-map', 'roosevelt-ave', 'diversity-plaza-74th'], ['Test Map', 'Roosevelt Avenue', 'Diversity Plaza'], null, ['test-map', 'start']]);
-  const gotoMap = (mapId) => { s.scene.restart({ mapId, spawnId: mapById(mapId).spawns[0].spawnId }); run(100); };
-  // Where to stand and which way to walk to step onto each warp (a new warp needs an entry; P2 checks coverage).
-  const APPROACH = { 'test-map/5': [420, 96, 'ArrowRight'], 'roosevelt-ave/1': [40, 112, 'ArrowLeft'], 'roosevelt-ave/3': [240, 48, 'ArrowUp'], 'diversity-plaza-74th/1': [240, 300, 'ArrowDown'] };
+    [['test-map', ...REAL], ['Test Map', 'Diversity Plaza', 'Roosevelt Avenue', 'Roosevelt at 82nd', 'Roosevelt at 87th', '37th Avenue', '37th Ave at 82nd', '37th Ave at 87th', 'Historic District', 'Historic District East'], null, ['roosevelt-ave', 'start']]);
+  const gotoMap = (mapId, spawnId = mapById(mapId).spawns[0].spawnId) => { s.scene.restart({ mapId, spawnId }); run(100); };
+
+  // ---- Map data helpers (6c): the collision grid, warps and NPCs of a map, read from its Tiled data ----
+  const GRIDS = new Map();
+  const grid = (mapId) => {
+    if (GRIDS.has(mapId)) return GRIDS.get(mapId);
+    const info = mapById(mapId); const d = info.data; const ts = d.tilesets.find((t) => t.name === 'tiles');
+    const solid = new Set((ts.tiles ?? []).filter((t) => t.properties?.some((p) => p.name === 'collides' && p.value === true)).map((t) => t.id + ts.firstgid));
+    const obs = d.layers.find((l) => l.name === 'obstacles').data;
+    const npcTiles = new Set((d.layers.find((l) => l.name === 'npcs')?.objects ?? []).map((o) => `${Math.floor(o.x / 16)},${Math.floor((o.y - 1) / 16)}`));
+    const W = d.width, H = d.height;
+    const inside = (r, tx, ty) => tx * 16 + 8 >= r.x && tx * 16 + 8 < r.x + r.width && ty * 16 + 8 >= r.y && ty * 16 + 8 < r.y + r.height;
+    const warpAt = (tx, ty) => info.warps.find((w) => inside(w, tx, ty));
+    const open = (tx, ty) => tx >= 0 && ty >= 0 && tx < W && ty < H && !solid.has(obs[ty * W + tx]) && !npcTiles.has(`${tx},${ty}`);
+    const G = { id: mapId, info, W, H, open, warpAt, inside };
+    GRIDS.set(mapId, G); return G;
+  };
+  const tileAt = (x, y) => [Math.floor(x / 16), Math.floor((y - 1) / 16)];
+  const STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const KEY_OF = { '1,0': 'ArrowRight', '-1,0': 'ArrowLeft', '0,1': 'ArrowDown', '0,-1': 'ArrowUp' };
+  const FACING_OF = { '1,0': 'right', '-1,0': 'left', '0,1': 'down', '0,-1': 'up' };
+  // Breadth-first search over open tiles (4-way, fixed neighbour order, so deterministic). Warp tiles
+  // are never walked through, only entered as the goal. Returns the tile path, start first, or null.
+  const bfs = (G, start, isGoal) => {
+    const key = (t) => t[1] * G.W + t[0]; const prev = new Map([[key(start), null]]); const queue = [start];
+    while (queue.length) {
+      const cur = queue.shift();
+      if (isGoal(cur)) { const path = [cur]; let k = prev.get(key(cur)); while (k !== null) { path.unshift([k % G.W, Math.floor(k / G.W)]); k = prev.get(k); } return path; }
+      if (G.warpAt(...cur) && cur !== start) continue;
+      for (const [dx, dy] of STEPS) { const n = [cur[0] + dx, cur[1] + dy]; if (G.open(...n) && !prev.has(key(n))) { prev.set(key(n), key(cur)); queue.push(n); } }
+    }
+    return null;
+  };
+  // Walks a tile path with real key events: one straight run per key, held exactly 16 frames per tile
+  // (60 px/s = 1 px a frame), so the player ends exactly on each tile centre. Stops at a warp.
+  const walkPath = (path, input = 'key') => {
+    for (let i = 0; i < path.length - 1 && !s.warping;) {
+      const d = [path[i + 1][0] - path[i][0], path[i + 1][1] - path[i][1]]; let j = i + 1;
+      while (j < path.length - 1 && path[j + 1][0] - path[j][0] === d[0] && path[j + 1][1] - path[j][1] === d[1]) j++;
+      const k = KEY_OF[d.join(',')]; ev('keydown', k); run((j - i) * 16 * FRAME); ev('keyup', k); i = j;
+    }
+  };
+  const waitArrival = () => { for (let n = 0; n < 120 && s.warping; n++) run(FRAME); run(FRAME); };
+  // Shortest chain of warps between two maps (BFS over the warp graph of the world maps).
+  const mapRoute = (from, to, avoid = []) => {
+    const prev = new Map([[from, null]]); const queue = [from];
+    while (queue.length) {
+      const m = queue.shift(); if (m === to) break;
+      for (const w of mapById(m).warps) if (!prev.has(w.targetMap) && !avoid.includes(w.targetMap)) { prev.set(w.targetMap, { m, w }); queue.push(w.targetMap); }
+    }
+    if (!prev.has(to)) return null;
+    const hops = []; for (let t = to; prev.get(t); t = prev.get(t).m) hops.unshift(prev.get(t).w); return hops;
+  };
+  // Walks from wherever the player is to a tile on another map, through warps, every step pathfound.
+  const travel = (mapId, isGoal, { via } = {}) => {
+    const log = [];
+    for (let hop = 0; s.info.id !== mapId && hop < 12; hop++) {
+      const G = grid(s.info.id); const w = (via && G.info.warps.find(via)) || mapRoute(s.info.id, mapId)[0];
+      const path = bfs(G, tileAt(s.player.x, s.player.y), (t) => G.inside(w, ...t));
+      if (!path) throw new Error(`travel: no path on ${s.info.id} to warp ${w.objectId}`);
+      walkPath(path); waitArrival(); log.push(s.info.id);
+    }
+    const G = grid(mapId); const path = bfs(G, tileAt(s.player.x, s.player.y), isGoal);
+    if (!path) throw new Error(`travel: no path on ${mapId} from ${tileAt(s.player.x, s.player.y)}`);
+    walkPath(path); return { maps: log, tiles: path.length };
+  };
+  // The open tile next to a delivery point (or NPC) the player can stand on, and the way to face it.
+  const facingSpot = (G, tx, ty, from) => {
+    const path = bfs(G, from, (t) => STEPS.some(([dx, dy]) => t[0] + dx === tx && t[1] + dy === ty) && !G.warpAt(...t));
+    if (!path) return null;
+    const stand = path.at(-1); return { path, stand, facing: FACING_OF[[tx - stand[0], ty - stand[1]].join(',')] };
+  };
+  const pointTile = (mapId, pointId) => { const p = mapById(mapId).deliveryPoints.find((q) => q.pointId === pointId); return [p.x / 16, p.y / 16]; };
+  // A warp's approach: the open tile next to it from which one step enters it (derived from the grid).
+  const approachOf = (G, warp) => {
+    for (let ty = warp.y / 16; ty < (warp.y + warp.height) / 16; ty++) for (let tx = warp.x / 16; tx < (warp.x + warp.width) / 16; tx++) {
+      for (const [dx, dy] of STEPS) { const a = [tx - dx, ty - dy]; if (G.open(...a) && !G.warpAt(...a)) return { tile: a, key: KEY_OF[[dx, dy].join(',')] }; }
+    }
+    return null;
+  };
   const allWarps = M.MAP_LIST.flatMap((m) => m.warps.map((w) => ({ from: m.id, warp: w })));
   // Walks onto a warp holding the key and steps until the next map has faded in. onFrame(i, phase) runs after each frame.
   const walkWarp = (from, warp, { onFrame, keepHeld = false, input = 'key' } = {}) => {
-    gotoMap(from); const [x, y, key] = APPROACH[`${from}/${warp.objectId}`]; at(x, y);
+    gotoMap(from); const ap = approachOf(grid(from), warp); const key = ap.key; at(ap.tile[0] * 16 + 8, ap.tile[1] * 16 + 12);
     const dpadDir = { ArrowRight: [100, 0], ArrowLeft: [-100, 0], ArrowUp: [0, -100], ArrowDown: [0, 100] }[key];
     if (input === 'dpad') pe(dpadEl, 'pointerdown', ...dpadDir, 41); else ev('keydown', key);
     const trace = [];
@@ -319,7 +403,12 @@ try {
     pairResults[`${from}/${warp.objectId}`] = landed(); pairExpected[`${from}/${warp.objectId}`] = expectLanding(warp);
   }
   const pairedBack = allWarps.every(({ from, warp }) => mapById(warp.targetMap).warps.some((w) => w.targetMap === from));
-  check('P2 every warp, both directions: lands on the target spawn, facing its way', [Object.keys(APPROACH).sort(), pairedBack, pairResults], [allWarps.map(({ from, warp }) => `${from}/${warp.objectId}`).sort(), true, pairExpected]);
+  // test-map's exit is one-way (into roosevelt-ave's start): the test fixture can't be reached from play.
+  const pairedReal = allWarps.filter(({ from }) => from !== 'test-map').every(({ from, warp }) => mapById(warp.targetMap).warps.some((w) => w.targetMap === from));
+  check('P2 every warp (approach derived from the collision grid): lands on the target spawn, facing its way; world warps come in pairs',
+    [allWarps.length, allWarps.every(({ from, warp }) => approachOf(grid(from), warp)), pairedReal, pairResults],
+    [2 * (WORLD.connections.filter((c) => c.kind === 'open').length + WORLD.mapConnections.flatMap((mc) => mc.at).length) + 1, true, true, pairExpected]);
+  void pairedBack;
   const count = (tr, ph) => tr.filter((f) => f.phase === ph).length;
   const outAlphas = firstTrace.filter((f) => f.phase === 'out').map((f) => f.alpha);
   check('P3 fade: ~250 ms out (to black) and ~250 ms in, player still throughout',
@@ -359,12 +448,13 @@ try {
 
   // P6. The window loses focus during the fade-out and again during the fade-in.
   const blurAt = { out: 5, in: 5 }; const seen = { out: 0, in: 0 };
-  walkWarp('roosevelt-ave', mapById('roosevelt-ave').warps.find((w) => w.targetMap === 'test-map'), { keepHeld: true, onFrame: (i, ph) => {
+  const p6Warp = mapById('roosevelt-ave').warps[0];
+  walkWarp('roosevelt-ave', p6Warp, { keepHeld: true, onFrame: (i, ph) => {
     if (ph in seen && ++seen[ph] === blurAt[ph]) { window.dispatchEvent(new Event('blur')); run(100); window.dispatchEvent(new Event('focus')); }
   } });
   const bArrive = landed(); run(400);
-  check('P6 focus lost mid-fade (out and in): warp completes, unlocked, nothing stuck', [bArrive, s.warping, s.controls.isLocked(), s.controls.direction(), [s.player.x, s.player.y]], [expectLanding(mapById('roosevelt-ave').warps.find((w) => w.targetMap === 'test-map')), false, false, null, [bArrive[1], bArrive[2]]]);
-  ev('keyup', 'ArrowLeft'); run(50);
+  check('P6 focus lost mid-fade (out and in): warp completes, unlocked, nothing stuck', [bArrive, s.warping, s.controls.isLocked(), s.controls.direction(), [s.player.x, s.player.y]], [expectLanding(p6Warp), false, false, null, [bArrive[1], bArrive[2]]]);
+  for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) ev('keyup', k); run(50);
 
   // P7. Broken links: dev throws (at boot and on use), production falls back.
   const warns2 = []; const ow = console.warn; console.warn = (...a) => warns2.push(a.join(' '));
@@ -374,18 +464,19 @@ try {
   const tmInfo = mapById('test-map'); tmInfo.warps.push({ objectId: 999, targetMap: 'nope', targetSpawn: 'x', x: 0, y: 0, width: 1, height: 1 }); const bootMsg = throwsMsg(M.validateLinks); tmInfo.warps.pop();
   check('P7 unknown map/spawn: throws in dev, falls back (with a warning) in production',
     [strictMsgs, bootMsg, [fb1.map.id, fb1.spawn.spawnId], [fb2.map.id, fb2.spawn.spawnId], warns2.length],
-    [['Unknown map "no-such-map"', 'Map "roosevelt-ave" has no spawn "no-such-spawn"'], 'Map "test-map", warp object 999: Unknown map "nope"', ['test-map', 'start'], ['roosevelt-ave', 'from-test-map'], 2]);
+    [['Unknown map "no-such-map"', 'Map "roosevelt-ave" has no spawn "no-such-spawn"'], 'Map "test-map", warp object 999: Unknown map "nope"', ['roosevelt-ave', 'start'], ['roosevelt-ave', 'start'], 2]);
 
   // P8. Talk to the NPC in each map.
   const zoneTalk = {};
   for (const m of M.MAP_LIST) {
-    gotoMap(m.id); const n0 = s.npcs[0]; place(n0.spawn.x, n0.spawn.y + 16, 'up'); press(); run(50);
+    gotoMap(m.id); const n0 = s.npcs[0]; if (!n0) continue; place(n0.spawn.x, n0.spawn.y + 16, 'up'); press(); run(50);
     const name = STR_MOD.t(`npc.${n0.spawn.npcId}.name`);
     zoneTalk[m.id] = [s.npcs.length, s.talking && g.scene.isActive('Dialogue'), D().pages[0].replace(/\n/g, ' ').includes(name), n0.sprite.frame.name % 4];
     closeDialogue(); zoneTalk[m.id].push(s.talking);
   }
-  // Session 5 added the Dispatcher to test-map (4 NPCs; s.npcs[0] is still Neighbor A).
-  check('P8 dialogue works in each map (opens, names the NPC, NPC turns, closes)', zoneTalk, { 'test-map': [4, true, true, 0, false], 'roosevelt-ave': [1, true, true, 0, false], 'diversity-plaza-74th': [1, true, true, 0, false] });
+  // 6c: the Dispatcher moved from test-map to roosevelt-ave; the stub maps' Neighbors D and E are gone with them.
+  check('P8 dialogue works in each map with NPCs (opens, names the NPC, NPC turns, closes)', zoneTalk, { 'test-map': [3, true, true, 0, false], 'roosevelt-ave': [1, true, true, 0, false] });
+  s.state.reset();
 
   // ---- Session 5 ----
   const ORD = await import('/src/systems/orders.ts');
@@ -396,26 +487,30 @@ try {
   const lastPage = () => D().pages.join(' ').replace(/\n/g, ' ');
   // Opens the window with Action, reads every page, closes it; returns the text shown.
   const talkAll = () => { press(); let text = ''; for (let n = 0; s.talking && n < 30; n++) { if (D().pageComplete() && !text.includes(D().pages[D().page])) text += D().pages[D().page].replace(/\n/g, ' ') + ' | '; press(); } run(100); return text; };
-  s.state.reset(); gotoMap('test-map');
+  s.state.reset(); gotoMap('roosevelt-ave', 'start');
 
-  // Q1. Order data: 2-3 orders; the pickup is off the dispatcher's map and the dropoff off the pickup's map,
-  // so each order needs at least one warp per leg; every map's points are drawn.
-  const dispatcherMap = 'test-map';
-  check('Q1 orders: 3 loaded, every leg crosses a warp, each map draws its delivery points',
-    [ORD.ORDERS.map((o) => o.id), ORD.ORDERS.every((o) => o.pickup.map !== dispatcherMap && o.dropoff.map !== o.pickup.map), s.npcs.filter((n) => n.spawn.role === 'dispatcher').map((n) => n.spawn.npcId),
-      M.MAP_LIST.map((m) => m.deliveryPoints.map((p) => p.pointId))],
-    [['order-1', 'order-2', 'order-3'], true, ['dispatcher'], [[], ['rav-a', 'rav-b'], ['plaza-a', 'plaza-b']]]);
+  // Q1. Order data: 3 orders; the pickup is off the dispatcher's map and the dropoff off the pickup's map,
+  // so each order needs at least one warp per leg; pickup and dropoff in different zones; every map's
+  // delivery points are its anchors (from the world dataset).
+  const dispatcherMap = 'roosevelt-ave';
+  const zoneOf = (mapId) => WORLD.maps.find((m) => m.id === mapId)?.zone;
+  const anchorsOf = (mapId) => { const segs = WORLD.maps.find((m) => m.id === mapId)?.segments ?? []; return WORLD.anchors.filter((a) => segs.includes(a.segment) && !a.uses.includes('dispatcher')).map((a) => a.id).sort(); };
+  check('Q1 orders: 3 loaded, every leg crosses a warp, pickup and dropoff in different zones, the Dispatcher on roosevelt-ave, each map draws its anchors',
+    [ORD.ORDERS.map((o) => o.id), ORD.ORDERS.every((o) => o.pickup.map !== dispatcherMap && o.dropoff.map !== o.pickup.map && zoneOf(o.pickup.map) !== zoneOf(o.dropoff.map)), s.npcs.filter((n) => n.spawn.role === 'dispatcher').map((n) => n.spawn.npcId),
+      M.MAP_LIST.map((m) => m.deliveryPoints.map((p) => p.pointId).sort())],
+    [['order-1', 'order-2', 'order-3'], true, ['dispatcher'], M.MAP_LIST.map((m) => anchorsOf(m.id))]);
 
   // Q2. State machine, on a fresh GameState over the real orders.
+  const [o1, o2] = ORD.ORDERS; const P = o1.pickup, Dp = o1.dropoff; const other = { map: o2.pickup.map, pointId: o2.pickup.pointId };
   const st = new GS.GameState(ORD.ORDERS); const log = [];
   const k = (r) => r.kind + (r.order ? ':' + r.order.id : '');
-  log.push(k(st.interact('roosevelt-ave', 'rav-a')));            // no order yet
-  log.push(k(st.assignNext()), k(st.assignNext()));                // assign, then busy
-  log.push(k(st.interact('diversity-plaza-74th', 'plaza-b')));    // dropoff before pickup
-  log.push(k(st.interact('roosevelt-ave', 'rav-b')));             // some other point
-  log.push(k(st.interact('diversity-plaza-74th', 'rav-a')));      // right pointId, wrong map
-  log.push(k(st.interact('roosevelt-ave', 'rav-a')), st.active.status, k(st.interact('roosevelt-ave', 'rav-a')));  // pick up, then again
-  log.push(k(st.interact('diversity-plaza-74th', 'plaza-b')), st.active, st.rewardTotal);  // deliver
+  log.push(k(st.interact(P.map, P.pointId)));                 // no order yet
+  log.push(k(st.assignNext()), k(st.assignNext()));          // assign, then busy
+  log.push(k(st.interact(Dp.map, Dp.pointId)));               // dropoff before pickup
+  log.push(k(st.interact(other.map, other.pointId)));         // some other point
+  log.push(k(st.interact(Dp.map, P.pointId)));                // right pointId, wrong map
+  log.push(k(st.interact(P.map, P.pointId)), st.active.status, k(st.interact(P.map, P.pointId)));  // pick up, then again
+  log.push(k(st.interact(Dp.map, Dp.pointId)), st.active, st.rewardTotal);  // deliver
   for (const o of ORD.ORDERS.slice(1)) { st.assignNext(); st.interact(o.pickup.map, o.pickup.pointId); st.interact(o.dropoff.map, o.dropoff.pointId); }
   log.push(k(st.assignNext()), st.completed, st.rewardTotal, st.active);
   check('Q2 order state machine: assign -> busy -> pick up -> deliver, wrong points do nothing, then none left', log,
@@ -442,7 +537,7 @@ try {
     noArray: 'orders.json: needs an "orders" array',
     reward: 'orders.json, order 0 ("order-1"): reward must be a number >= 0',
     unknownMap: 'orders.json, order 0 ("order-1"): dropoff names unknown map "no-such-map"',
-    unknownPoint: 'orders.json, order 0 ("order-1"): map "roosevelt-ave" has no delivery point "no-such-point"',
+    unknownPoint: `orders.json, order 0 ("order-1"): map "${P.map}" has no delivery point "no-such-point"`,
     missingString: 'orders.json, order 0 ("order-1"): text.assign names missing string "order.no-such-string"',
     samePoint: 'orders.json, order 0 ("order-1"): pickup and dropoff are the same point',
     duplicateId: 'orders.json, order 1 ("order-1"): duplicate id',
@@ -457,69 +552,139 @@ try {
     ['Map "fx", object 2 ("p"): a delivery point must be a rectangle', 'Map "fx", object 2 ("p"): needs string property "pointId"', 'Map "fx", object 3 ("p"): duplicate pointId "x"',
       'NPC object 9 in layer "npcs": role must be one of dispatcher']);
 
-  // Q4. End to end in the game: Dispatcher -> warp -> pick up -> warp -> deliver. State and ticket survive each warp.
-  s.state.reset(); gotoMap('test-map');
+  // Q4. End to end in the game, walking every step with real key events along pathfound routes:
+  // start -> Dispatcher -> warps -> pick up -> warps -> deliver. State and ticket survive each warp.
+  const mapName = (id) => STR_MOD.t(mapById(id).nameId);
+  s.state.reset(); gotoMap('roosevelt-ave', 'start');
   const e2e = { before: [ticket(), s.state.active] };
   const disp = s.npcs.find((n) => n.spawn.role === 'dispatcher');
-  place(disp.spawn.x - 16, disp.spawn.y, 'right');
+  const dTile = tileAt(disp.spawn.x, disp.spawn.y);
+  let spot = facingSpot(grid('roosevelt-ave'), ...dTile, tileAt(s.player.x, s.player.y));
+  walkPath(spot.path); s.facing = spot.facing;
+  e2e.reachedDispatcher = [tileAt(s.player.x, s.player.y).join(','), s.facing];
   e2e.dispatcher = talkAll(); e2e.afterAssign = [ticket(), s.state.active?.order.id, s.state.active?.status];
   e2e.dispatcherAgain = talkAll();
-  walkWarp('test-map', mapById('test-map').warps[0]);
-  e2e.afterWarp1 = [s.info.id, ticket(), s.state.active?.status];
-  place(104, 40, 'right'); e2e.facingAway = talkAll();                         // point is north; facing east does nothing
-  place(328, 240, 'down'); e2e.otherPoint = talkAll();                        // rav-b: not this order's point
-  place(104, 40, 'up'); e2e.pickup = talkAll(); e2e.afterPickup = [ticket(), s.state.active?.status];
-  walkWarp('roosevelt-ave', mapById('roosevelt-ave').warps.find((w) => w.targetMap === 'diversity-plaza-74th'));
-  e2e.afterWarp2 = [s.info.id, ticket(), s.state.active?.status];
-  place(328, 304, 'down'); e2e.deliver = talkAll();
+  const goFace = (stop) => {
+    const [tx, ty] = pointTile(stop.map, stop.pointId); let found = null;
+    const r = travel(stop.map, (t) => { const f = STEPS.find(([dx, dy]) => t[0] + dx === tx && t[1] + dy === ty); if (f && !grid(stop.map).warpAt(...t)) found = f; return !!f && !grid(stop.map).warpAt(...t); });
+    s.facing = FACING_OF[found.join(',')]; return r;
+  };
+  const leg1 = goFace(o1.pickup);
+  e2e.afterLeg1 = [s.info.id, ticket(), s.state.active?.status, leg1.maps.length >= 1];
+  const fp = s.facing; s.facing = { up: 'down', down: 'up', left: 'right', right: 'left' }[fp]; e2e.facingAway = talkAll(); s.facing = fp;
+  e2e.pickup = talkAll(); e2e.afterPickup = [ticket(), s.state.active?.status];
+  const leg2 = goFace(o1.dropoff);
+  e2e.afterLeg2 = [s.info.id, ticket(), s.state.active?.status, leg2.maps.length >= 1];
+  e2e.deliver = talkAll();
   e2e.after = [ticket(), s.state.active, s.state.completed, s.state.rewardTotal];
-  check('Q4 end to end: assign at the Dispatcher, pick up and deliver across two warps; state and ticket survive warps', e2e, {
+  R['Q4 info: route maps (leg 1 / leg 2)'] = `${leg1.maps.join(' > ')} / ${leg2.maps.join(' > ')}`;
+  check('Q4 end to end on the world maps (routes pathfound): Dispatcher, pick up and deliver across warps; state and ticket survive warps', e2e, {
     before: [null, null],
-    dispatcher: "I'm the Dispatcher. I hand out delivery orders, one at a time. | Order #1 is ready for pickup at Roosevelt Avenue. Bring it to Diversity Plaza. | ",
-    afterAssign: [['Order #1: not picked up', 'Pick up at Roosevelt Avenue'], 'order-1', 'assigned'],
-    dispatcherAgain: "I'm the Dispatcher. I hand out delivery orders, one at a time. | You still have Order #1 to pick up at Roosevelt Avenue. | ",
-    afterWarp1: ['roosevelt-ave', ['Order #1: not picked up', 'Pick up at Roosevelt Avenue'], 'assigned'],
+    reachedDispatcher: [[dTile[0], dTile[1] + 1].join(','), 'up'],
+    dispatcher: `I'm the Dispatcher. I hand out delivery orders, one at a time. | Order #1 is ready for pickup at ${mapName(P.map)}. Bring it to ${mapName(Dp.map)}. | `,
+    afterAssign: [['Order #1: not picked up', `Pick up at ${mapName(P.map)}`], 'order-1', 'assigned'],
+    dispatcherAgain: `I'm the Dispatcher. I hand out delivery orders, one at a time. | You still have Order #1 to pick up at ${mapName(P.map)}. | `,
+    afterLeg1: [P.map, ['Order #1: not picked up', `Pick up at ${mapName(P.map)}`], 'assigned', true],
     facingAway: '',
-    otherPoint: 'Nothing here. | ',
-    pickup: 'You picked up Order #1. Bring it to Diversity Plaza. | ',
-    afterPickup: [['Order #1: picked up', 'Deliver to Diversity Plaza'], 'picked-up'],
-    afterWarp2: ['diversity-plaza-74th', ['Order #1: picked up', 'Deliver to Diversity Plaza'], 'picked-up'],
+    pickup: `You picked up Order #1. Bring it to ${mapName(Dp.map)}. | `,
+    afterPickup: [['Order #1: picked up', `Deliver to ${mapName(Dp.map)}`], 'picked-up'],
+    afterLeg2: [Dp.map, ['Order #1: picked up', `Deliver to ${mapName(Dp.map)}`], 'picked-up', true],
     deliver: 'You delivered Order #1. Nice work! | ',
     after: [null, null, ['order-1'], 10],
   });
-  // Q5. Dropoff before pickup, and the "nothing here" line with no active order.
-  s.state.assignNext(); gotoMap('roosevelt-ave'); place(328, 240, 'down'); const early = talkAll();
-  s.state.reset(); gotoMap('roosevelt-ave'); place(104, 40, 'up'); const noOrder = talkAll();
+  // Q5. Dropoff before pickup, and the "nothing here" line with no active order (placed at the facing spot).
+  const placeAt = (stop) => { gotoMap(stop.map); const [tx, ty] = pointTile(stop.map, stop.pointId); const f = facingSpot(grid(stop.map), tx, ty, tileAt(s.player.x, s.player.y)); place(f.stand[0] * 16 + 8, f.stand[1] * 16 + 12, f.facing); };
+  s.state.assignNext(); placeAt(o2.dropoff); const early = talkAll();
+  s.state.reset(); placeAt(o2.dropoff); const noOrder = talkAll();
   check('Q5 dropoff before pickup explains; a point with no active order says nothing here', [early, noOrder, s.state.active],
-    ["Order #2 goes here, but you haven't picked it up yet. It's at Diversity Plaza. | ", 'Nothing here. | ', null]);
+    [`Order #2 goes here, but you haven't picked it up yet. It's at ${mapName(o2.pickup.map)}. | `, 'Nothing here. | ', null]);
 
-  // Q6. Order ticket: drawn pixel-exact at whole pixels, top-left under the name card, over the map; hidden with no order.
-  s.state.reset(); s.state.assignNext(); gotoMap('roosevelt-ave'); run(1600); run(FRAME);
+  // Q6. Order ticket: drawn pixel-exact at whole pixels, centred under the name card, over the map; hidden with no order.
+  s.state.reset(); s.state.assignNext(); gotoMap('roosevelt-ave', 'start'); run(1600); run(FRAME);
   const tPx = snap(); const tLines = ticket(); const tBad = [];
   tLines.forEach((line, row) => [...line].forEach((ch, col) => {
     for (let y = 0; y < 12; y++) for (let x = 0; x < 6; x++) if (rgbAt(tPx, s.ticketText.x + col * 6 + x, s.ticketText.y + row * 12 + y) !== (bit(ch.charCodeAt(0), x, y) ? 0xfffaf0 : 0x2a1f3d)) { tBad.push(ch); return; }
   }));
-  const tb = s.ticketBox;
+  const tb = s.ticketBox; const tw = 6 * Math.max(...tLines.map((l) => l.length)) + 6;
   check('Q6 ticket: whole-pixel box centred at y=24 (under the name card row), pixel-exact text, fixed to the screen, over sprites and canopies, under the name card',
     [[tb.x, tb.y, tb.width, tb.height], tBad, [tb.scrollFactorX, s.ticketText.scrollFactorX], tb.depth > layerOf('above').depth && tb.depth > s.emote.depth, tb.y >= 4 + 12 + 6, tb.depth < 2e6],
-    [[44, 24, 6 * 27 + 6, 2 * 12 + 6], [], [0, 0], true, true, true]);
-  // Q6c (x=88 stays clear of Neighbor D). Near the map's top edge the camera stops scrolling and the player reaches the top of the screen: the ticket moves to the bottom.
+    [[Math.floor((256 - tw) / 2), 24, tw, 2 * 12 + 6], [], [0, 0], true, true, true]);
+  // Q6c. Near the map's top edge the camera stops scrolling and the player reaches the top of the screen:
+  // walk (pathfound) up into a north link stub, stopping a tile short of its warp; the ticket moves to the bottom.
   const sprite = () => { const c = s.cameras.main; return [s.player.x - 8 - c.scrollX, s.player.y - 24 - c.scrollY, 16, 24]; };
   const hits = (a, b) => a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1];
   const tRect = () => [tb.x, tb.y, tb.width, tb.height];
-  const ticketLog = []; at(88, 112); ev('keydown', 'ArrowUp');
-  for (let i = 0; i < 90; i++) { run(FRAME); ticketLog.push([tb.y, hits(sprite(), tRect())]); } ev('keyup', 'ArrowUp'); run(50);
-  const atTop = [s.player.y, tb.y, hits(sprite(), tRect())]; ev('keydown', 'ArrowDown'); run(1000); ev('keyup', 'ArrowDown'); run(50);
+  const Gr = grid('roosevelt-ave'); const northWarp = Gr.info.warps.find((w) => w.y === 16 && w.width > w.height);
+  const topTile = [northWarp.x / 16 + 1, northWarp.y / 16 + 1];
+  const upPath = bfs(Gr, tileAt(s.player.x, s.player.y), (t) => t[0] === topTile[0] && t[1] === topTile[1]);
+  const ticketLog = [];
+  for (let i = 0; i < upPath.length - 1; i++) {
+    const d = [upPath[i + 1][0] - upPath[i][0], upPath[i + 1][1] - upPath[i][1]]; const kk = KEY_OF[d.join(',')];
+    ev('keydown', kk); for (let f = 0; f < 16; f++) { run(FRAME); ticketLog.push([tb.y, hits(sprite(), tRect())]); } ev('keyup', kk);
+  }
+  run(50);
+  const atTop = [s.info.id, s.player.y, tb.y, hits(sprite(), tRect())];
+  walkPath([...upPath].reverse()); run(50);
   check('Q6c ticket moves to the bottom while the player is under it, never covers the player, and comes back',
-    [atTop, ticketLog.every(([, hit]) => !hit), [...new Set(ticketLog.map(([y]) => y))], tb.y], [[40, 224 - 4 - 30, false], true, [24, 190], 24]);
-  s.state.reset(); gotoMap('roosevelt-ave'); run(FRAME);
+    [atTop, ticketLog.every(([, hit]) => !hit), [...new Set(ticketLog.map(([y]) => y))], tb.y], [['roosevelt-ave', topTile[1] * 16 + 12, 224 - 4 - 30, false], true, [24, 190], 24]);
+  s.state.reset(); gotoMap('roosevelt-ave', 'start'); run(FRAME);
   check('Q6b ticket hidden with no active order', [ticketShown(), s.ticketBox.visible, s.ticketText.visible], [false, false, false]);
+
+  // ---- Session 6c: the generated world maps ----
+  // S1. Reachability from the start, over the collision grids (flood fill per map, following warps).
+  const reach = new Map(); // mapId -> Set of reachable tile keys
+  const queueS = [[M.START.map.id, tileAt(M.START.spawn.x, M.START.spawn.y)]]; const warpsSeen = new Set();
+  while (queueS.length) {
+    const [mid, t0] = queueS.shift(); const G = grid(mid); const seen = reach.get(mid) ?? new Set(); reach.set(mid, seen);
+    if (seen.has(`${t0}`)) continue;
+    const q = [t0]; seen.add(`${t0}`);
+    while (q.length) {
+      const t = q.shift(); const w = G.warpAt(...t);
+      if (w) { const key = `${mid}/${w.objectId}`; if (!warpsSeen.has(key)) { warpsSeen.add(key); const dst = M.resolveDestination(w.targetMap, w.targetSpawn, true); queueS.push([dst.map.id, tileAt(dst.spawn.x, dst.spawn.y)]); } continue; }
+      for (const [dx, dy] of STEPS) { const n = [t[0] + dx, t[1] + dy]; if (G.open(...n) && !seen.has(`${n}`)) { seen.add(`${n}`); q.push(n); } }
+    }
+  }
+  const realWarps = allWarps.filter(({ from }) => from !== 'test-map');
+  check('S1 every world map is reachable from the start (pathfinding over the collision grid), every world warp too; test-map is not',
+    [[...reach.keys()].sort(), realWarps.filter(({ from, warp }) => !warpsSeen.has(`${from}/${warp.objectId}`)).map(({ from, warp }) => `${from}/${warp.objectId}`), reach.has('test-map')], [[...REAL].sort(), [], false]);
+
+  // S2. Every warp pair round-trips, walked with real keys: step into the warp from its approach, then walk
+  // (pathfound) from the arrival spawn into the warp back at the same node; land next to the first warp.
+  const roundTrips = {};
+  const nearWarp = (x, y, warp) => Math.hypot(x - (warp.x + warp.width / 2), y - (warp.y + warp.height / 2)) <= 4 * 16;
+  for (const { from, warp } of realWarps) {
+    walkWarp(from, warp); const arrivedAt = s.info.id;
+    // The way back: a warp to `from` whose landing spawn sits by the warp just taken.
+    const G = grid(arrivedAt);
+    const back = G.info.warps.find((w) => { const d = w.targetMap === from && M.resolveDestination(w.targetMap, w.targetSpawn); return d && nearWarp(d.spawn.x, d.spawn.y, warp); });
+    let res = [arrivedAt === warp.targetMap, !!back];
+    if (back) {
+      const path = bfs(G, tileAt(s.player.x, s.player.y), (t) => G.inside(back, ...t));
+      if (path) { walkPath(path); waitArrival(); }
+      res = [arrivedAt === warp.targetMap, !!path, s.info.id === from, nearWarp(s.player.x, s.player.y, warp), !s.warping && !s.controls.isLocked()];
+    }
+    roundTrips[`${from}/${warp.objectId}`] = res.length === 5 && res.every(Boolean) ? 'ok' : res;
+  }
+  for (const kk of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) ev('keyup', kk); run(50);
+  check('S2 every world warp pair round-trips when walked (there and back lands within 4 tiles of the first warp)',
+    Object.entries(roundTrips).filter(([, v]) => v !== 'ok'), []); R['S2 info: warps walked both ways'] = Object.keys(roundTrips).length;
+
+  // S3. Every delivery point: reachable from the start and facing-accessible (Action from the open tile in
+  // front of it opens the delivery line; no order is active, so it's "Nothing here.").
+  s.state.reset(); const pointsBad = []; let pointsOk = 0;
+  for (const mid of REAL) for (const p of mapById(mid).deliveryPoints) {
+    const G = grid(mid); const [tx, ty] = [p.x / 16, p.y / 16];
+    const stands = STEPS.map(([dx, dy]) => [tx - dx, ty - dy]).filter((t) => G.open(...t) && !G.warpAt(...t) && reach.get(mid)?.has(`${t}`));
+    if (!stands.length) { pointsBad.push(`${mid}/${p.pointId}: no reachable tile in front`); continue; }
+    gotoMap(mid); const st0 = stands[0]; place(st0[0] * 16 + 8, st0[1] * 16 + 12, FACING_OF[[tx - st0[0], ty - st0[1]].join(',')]);
+    const said = talkAll(); if (said === 'Nothing here. | ') pointsOk++; else pointsBad.push(`${mid}/${p.pointId}: said "${said}"`);
+  }
+  check('S3 every delivery point is reachable from the start and facing-accessible', [pointsOk, pointsBad], [WORLD.anchors.filter((a) => !a.uses.includes('dispatcher')).length, []]);
 } catch (e) {
   R.ERROR = String(e && e.stack || e);
 } finally {
   for (let n = 0; s.talking && n < 30; n++) { ev('keydown', 'Space'); run(FRAME); ev('keyup', 'Space'); run(FRAME); }
   s.state?.reset(); s.scene.restart({}); run(100);
-  at(232, 268); s.facing = 'down';
   g.loop.wake();
 }
 R['frames stepped'] = frames;

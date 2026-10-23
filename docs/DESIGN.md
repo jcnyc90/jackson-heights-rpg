@@ -12,7 +12,7 @@ This document has three parts:
 2. **Technical conventions:** set in session 1 to keep future work cheap. They're cheap to change now and get more expensive later.
 3. **Roadmap and open questions.**
 
-Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1. Section 2.11 covers dialogue and NPCs (session 3), 2.12 maps, warps and zones (session 4), 2.13 the delivery loop (session 5), and 2.14 the world dataset (sessions 6a and 6b).
+Section 2.10 records what changed when the engine moved from Phaser 3.90.0 to 4.2.1. Section 2.11 covers dialogue and NPCs (session 3), 2.12 maps, warps and zones (session 4; the world maps since 6c), 2.13 the delivery loop (session 5), 2.14 the world dataset (sessions 6a to 6c), and 2.15 the map generator (session 6c).
 
 ---
 
@@ -262,17 +262,9 @@ Name each object for the editor (`to-roosevelt-ave`, `from-test-map`); the game 
 
 **Input lock** (`Controls.setLocked`). While locked, direction is null and Action presses are swallowed. Every key or D-pad press that is down when the lock starts, or pressed during it, goes **stale**: it's ignored until released. Keyboard auto-repeat keydowns are stale too. That matters because Phaser destroys and recreates its Key objects when a scene restarts, so a held key's next auto-repeat would otherwise register as a fresh press on the new map. Touch uses a press counter (`touchState.dpadPresses`) for the same purpose. Losing window focus mid-fade releases everything as usual (2.10); the fade still completes.
 
-**Zones.** `roosevelt-ave` (Roosevelt Avenue: road under the elevated train, pillars as wall tiles) and `diversity-plaza-74th` (Diversity Plaza: 37th Rd along the top, a paved plaza with trees and planters). Both are **rough, disposable placeholders** built from the existing tiles; the world dataset will replace their layouts. They contain no businesses, people or community content; each has one placeholder NPC with neutral dialogue (Neighbor D, Neighbor E).
+**Zones (since 6c).** The registry lists the nine generated world maps (2.14, 2.15) and `test-map`. `start` is `roosevelt-ave` / `start`, mid-block on Roosevelt Ave 74th–75th St by the Dispatcher. Every open connection in the world data is a warp pair (a short stub street with a spawn and a warp at each end); walled connections have no warp. The 52 world warps, their spawns and their maps are generated, so the generator and the dataset are their record (2.15); `npm run test:world` and regression S2 check that every pair leads back.
 
-| From | Warp (object) | To spawn | Lands at (feet), facing |
-|------|---------------|----------|-------------------------|
-| `test-map` | `to-roosevelt-ave` (5): east end of the street | `roosevelt-ave` / `from-test-map` | (24, 112), right |
-| `roosevelt-ave` | `to-test-map` (1): west end of the avenue | `test-map` / `from-roosevelt-ave` | (440, 96), left |
-| `roosevelt-ave` | `to-diversity-plaza-74th` (3): gap in the north buildings | `diversity-plaza-74th` / `from-roosevelt-ave` | (240, 304), up |
-| `diversity-plaza-74th` | `to-roosevelt-ave` (1): gap in the south wall | `roosevelt-ave` / `from-diversity-plaza-74th` | (240, 48), down |
-
-The test map's warp sits on tiles no session 1–3 check visits, so the old checks' walks never trigger it.
-
+**The test map** stays registered as a hidden, test-only fixture: no world map warps to it, so normal play never reaches it (regression S1 checks this). Its one warp, the street's east end, is a one-way exit into `roosevelt-ave` / `start`, kept for the warp, fade and input-lock checks (P3–P5) and the touch check. The session 4 stub maps `roosevelt-ave` and `diversity-plaza-74th` are retired: the generated maps replace them under the same ids, so their display-name strings stay. Neighbors D and E went with them.
 
 ### 2.13 Delivery loop (session 5)
 
@@ -287,7 +279,7 @@ The test map's warp sits on tiles no session 1–3 check visits, so the old chec
 | Active order's dropoff, not picked up yet | `delivery.not-picked-up` (where to pick it up). |
 | Any other delivery point, or no active order | `delivery.nothing` ("Nothing here."). |
 
-The Dispatcher's own `dialogueId` lines come first, then the order line. NPCs come first: a point behind an NPC isn't reachable with Action.
+The Dispatcher stands on the north sidewalk of Roosevelt Ave between 74th and 75th St (anchor `rav-dispatch`, placed by the generator; until 6c on the test map). The Dispatcher's own `dialogueId` lines come first, then the order line. NPCs come first: a point behind an NPC isn't reachable with Action.
 
 **Orders** (`src/data/orders.json`, `src/systems/orders.ts`): `id` (unique), `itemId`, `reward` (number ≥ 0), `pickup` and `dropoff` (`{ map, pointId }`), and `text`, the string IDs of everything the player reads about the order: `item` (its name), `assign`, `pickedUp`, `delivered`. Order strings can use `{item}`, `{pickup}`, `{dropoff}` (map display names) and `{reward}`. Validation: field types, unique `id`, a registered map, a delivery point on that map, pickup ≠ dropoff, every string ID present. **Dev builds throw** on the first problem when the module loads (the game doesn't start); **production** skips a bad order with a warning and keeps the rest, matching the warp-link policy (2.12).
 
@@ -297,15 +289,13 @@ The Dispatcher's own `dialogueId` lines come first, then the order line. NPCs co
 
 **Order ticket.** Shown only while an order is active: line 1 is the item and its status (`hud.order.assigned` / `hud.order.picked-up`), line 2 the map to go to next, the pickup's until it's picked up, then the dropoff's (`hud.go.*`). Plain text on a dark box at whole-pixel positions, centred horizontally, 24 px from the top, under the map name card's row. Near a map's top edge the camera stops scrolling and the player reaches the top of the screen, so while the ticket would cover the player's sprite it moves to 4 px from the bottom (like the text window, 2.11). It fades with the map and draws under the text window. The touch controls only ever sit below the game (portrait) or along the bottom corners (landscape), so the ticket clears them in both places; touch-check.js measures every order's ticket in both positions against the D-pad and Action button.
 
-**Placeholder content (disposable with the stub zones).** Three orders, "Order #1" to "Order #3", no real food, businesses or people:
+**Placeholder content (6c: re-pointed at world-data anchors).** Three orders, "Order #1" to "Order #3", no real food, businesses or people. Each pickup and dropoff is a delivery anchor of the world data, the two in different zones, and every leg needs at least one warp (Claude's choices):
 
-| Order | Pickup | Dropoff | Warps from the Dispatcher |
-|-------|--------|---------|---------------------------|
-| `order-1` (reward 10) | `roosevelt-ave` / `rav-a` (north wall) | `diversity-plaza-74th` / `plaza-b` (south wall) | test map → Roosevelt Ave; → Diversity Plaza |
-| `order-2` (15) | `diversity-plaza-74th` / `plaza-a` (north wall) | `roosevelt-ave` / `rav-b` (south wall) | → Roosevelt Ave → Diversity Plaza; → Roosevelt Ave |
-| `order-3` (20) | `roosevelt-ave` / `rav-b` | `diversity-plaza-74th` / `plaza-a` | → Roosevelt Ave; → Diversity Plaza |
-
-The Dispatcher stands on the test map's south-east sidewalk at (440, 288), outside every session 1–4 render shot and walk.
+| Order | Pickup | Dropoff | Warps (shortest route) |
+|-------|--------|---------|------------------------|
+| `order-1` (reward 10) | `diversity-plaza-74th` / `plaza-37rd-1` (37th Rd plaza, north side) | `ave-37` / `ave37-77-1` (37th Ave 77th–78th, south side) | Dispatcher → Diversity Plaza (1); → 37th Avenue via 74th St (1) |
+| `order-2` (15) | `ave-37-79-84` / `ave37-83-1` (37th Ave 83rd–84th, south side) | `roosevelt-ave-84-90` / `rav-86-1` (Roosevelt 86th St–Elbertson St, north side) | Dispatcher → 37th Ave at 82nd via the 79th St connector (1); → 37th Ave at 87th → Roosevelt at 87th via the 85th St connector (2) |
+| `order-3` (20) | `historic-district` / `hd-79-1` (79th St, 35th–37th Ave, east side) | `diversity-plaza-74th` / `plaza-triangle-1` (Broadway 74th–75th, north side) | Dispatcher → 37th Avenue via the 78th St connector → Historic District via 78th St (2); → 37th Avenue → Diversity Plaza via 74th St (2) |
 
 ### 2.14 World dataset (sessions 6a, 6b, 6c)
 
@@ -453,7 +443,7 @@ Each session should produce one small, testable result and end with a report.
 | **5** ✅ | Delivery loop v1 | Order data model (JSON): pickup, dropoff, item, reward. Accept, pick up and deliver flow; on-screen order ticket. Orders send the player across zones. |
 | **6a** ✅ | World dataset (data only) | Source and licence decision (hand-drawn from NYC city data, not OSM). Dataset schema, `src/data/world/jackson-heights.json` (first pass, Roosevelt Ave 73rd–75th St; widened to all four zones by the 6b brief), validator and tests (2.14). No game changes. |
 | **6b** ✅ | Verify and expand the world dataset (data only) | PR #1 merged. Every 6a fact checked against LION 26C and the LPC, DOT, Parks and MTA datasets (Broadway corrected, 37th Rd confirmed east of 74th St). All four locked zones at their real extent, every elevated-7 station in the bounds, areas (Historic District, plazas, Travers Park, Pride route), open/wall connections, a proposed 11-map split plan, 24 anchors + the Dispatcher's, 11 fictional landmark slots. Validator schema v2 and 15 tests. README credits for the NYC data. No game changes (2.14). |
-| **6c** | World maps | Generator or documented hand process from the dataset to the 11 Tiled maps in the split plan; replace the `roosevelt-ave` and `diversity-plaza-74th` stubs and add the other nine; decide the test map's fate; move the Dispatcher to `rav-dispatch`; re-point orders at the new pointIds; rewrite the layout-bound checks (P2, Q4, Q6c, the live-check route, the touch-check order). Decide how to draw 34th Ave (street or plaza) and which `unmapped` cross streets become links. |
+| **6c** ✅ | World maps | Owner's decisions: about 8 tiles per short block, 34th Ave as a car-free paseo, the cross streets between 37th Ave and Roosevelt Ave as connectors. Dataset schema 3 with a `layout` block and a 9-map split (2.14). Dependency-free generator to Tiled maps, normalized by Tiled's writer, with a byte-level no-diff check (2.15). The world maps replace the stubs; start on Roosevelt Ave; test-map kept as a hidden fixture. Dispatcher at `rav-dispatch`; orders re-pointed at anchors. Layout-bound checks rewritten to pathfind over map data; new reachability, round-trip and delivery-point checks (regression 111 → 114). |
 | **7** | Saves and title | Versioned localStorage saves, autosave on zone change or delivery, title screen with Continue/New, settings stub (text speed). |
 | **8** | Battle system v1 | Encounter trigger; first-person menu battle scene; rolling HP counter; fictional gentrification-themed enemies from JSON; basic attack, defend and flee commands with original labels. |
 | **9** | Organizing moves and progression | Tenant-organizing specials (rent strike, petition, block party), a resource meter, XP and levels, status effects, balance pass. |

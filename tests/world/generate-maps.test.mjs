@@ -84,3 +84,24 @@ test('generator refuses a layout with no room for a link stub', () => {
   for (const m of d.maps) m.tiles = [m.tiles[0] - 12, m.tiles[1] - 12];
   assert.throws(() => buildMaps(d), /no room for a link stub/);
 });
+
+test('the committed maps match a fresh generation (no Tiled needed; npm run maps:check compares bytes)', () => {
+  // Tiled's writer adds no data; compare everything the game reads.
+  const norm = (json) => ({
+    size: [json.width, json.height, json.tilewidth, json.tileheight],
+    tilesets: json.tilesets.map((t) => [t.name, t.firstgid, t.tilecount, t.image, JSON.stringify(t.tiles ?? [])]),
+    layers: json.layers.map((l) => ({
+      name: l.name, type: l.type, data: l.data,
+      objects: l.objects?.map((o) => [o.id, o.name, o.type, o.x, o.y, o.width, o.height, !!o.point, JSON.stringify(o.properties.map((p) => [p.name, p.type, p.value]))]),
+    })),
+    nextobjectid: json.nextobjectid,
+    properties: JSON.stringify(json.properties),
+  });
+  for (const [id, json] of byId) {
+    const committed = JSON.parse(readFileSync(new URL(`../../src/data/maps/${id}.json`, import.meta.url), 'utf8'));
+    assert.deepEqual(norm(committed), norm(json), `${id}.json is stale or was edited by hand: run npm run maps:generate`);
+  }
+  const registry = JSON.parse(readFileSync(new URL('../../src/data/maps/index.json', import.meta.url), 'utf8'));
+  assert.deepEqual(registry.maps.map((m) => m.id).filter((id) => id !== 'test-map'), world.maps.map((m) => m.id));
+  assert.deepEqual(registry.start, { map: 'roosevelt-ave', spawn: 'start' });
+});

@@ -1,8 +1,15 @@
 {
-  "start": { "map": "test-map", "spawn": "start" },
+  "start": { "map": "roosevelt-ave", "spawn": "start" },
   "maps": [
     { "id": "test-map", "file": "test-map.json", "name": "map.test-map.name" },
+    { "id": "diversity-plaza-74th", "file": "diversity-plaza-74th.json", "name": "map.diversity-plaza-74th.name" },
     { "id": "roosevelt-ave", "file": "roosevelt-ave.json", "name": "map.roosevelt-ave.name" },
-    { "id": "diversity-plaza-74th", "file": "diversity-plaza-74th.json", "name": "map.diversity-plaza-74th.name" }
+    { "id": "roosevelt-ave-79-84", "file": "roosevelt-ave-79-84.json", "name": "map.roosevelt-ave-79-84.name" },
+    { "id": "roosevelt-ave-84-90", "file": "roosevelt-ave-84-90.json", "name": "map.roosevelt-ave-84-90.name" },
+    { "id": "ave-37", "file": "ave-37.json", "name": "map.ave-37.name" },
+    { "id": "ave-37-79-84", "file": "ave-37-79-84.json", "name": "map.ave-37-79-84.name" },
+    { "id": "ave-37-84-90", "file": "ave-37-84-90.json", "name": "map.ave-37-84-90.name" },
+    { "id": "historic-district", "file": "historic-district.json", "name": "map.historic-district.name" },
+    { "id": "historic-district-82-88", "file": "historic-district-82-88.json", "name": "map.historic-district-82-88.name" }
   ]
 }

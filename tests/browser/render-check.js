@@ -3,6 +3,7 @@
 // are NOT exact palette colours (any blending/smoothing/sub-pixel sampling shows up there).
 // Session 3: hides NPCs for the session-2 parity shots, then adds an NPC + text-window shot.
 // Session 4: the tree redraw and canopies change the map shots; the dialogue shot changes only in its glyphs.
+// Session 6c: restarts on test-map first (the start moved to roosevelt-ave); test-map's tiles are unchanged, its Dispatcher moved out.
 // Async: returns a Promise of the results object.
 const PALETTE = ["#2a1f3d","#a6e3a1","#7fc98a","#f6dccb","#dcb9a8","#9a98c2","#86849f","#fff1a6","#ef9f95","#cf7f7a","#b5e3f5","#7dd3a0","#58b07f","#b07c62","#c7a6e6","#a585c6","#ff9fc6","#ffe28a","#94d8f5","#e0f6ff","#fffaf0","#c98d63","#3b2a2a","#ff8f7a","#6fcfc4","#6a76b8","#ffd46e","#1b1528","#f0c39a","#8a5a3c"];
 const g = window.game; const s = g.scene.getScene('Map');
@@ -11,6 +12,8 @@ const pal = new Set(PALETTE.map((h) => parseInt(h.slice(1), 16)));
 g.loop.sleep();
 const settle = (n = 6) => { for (let i = 0; i < n; i++) { T += FRAME; g.step(T, FRAME); } };
 const grab = () => g.canvas.toDataURL('image/png'); // same task as the render, so the WebGL buffer is intact
+// Since 6c the game starts on a world map; the fixed shots are of test-map.
+s.scene.restart({ mapId: 'test-map', spawnId: 'start' }); settle(10);
 const shots = {};
 s.npcs.forEach((n) => n.sprite.setVisible(false));
 s.player.body.reset(232, 268); s.player.setFrame(0); settle(); shots['spawn'] = grab();

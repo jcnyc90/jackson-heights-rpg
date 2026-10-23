@@ -3,6 +3,8 @@
 // Session 4 adds a warp taken with the D-pad held (and an Action tap during the fade).
 // Session 5 adds the order ticket's placement against the controls (every order, both statuses,
 // top and bottom positions) and one delivery order completed with touch input only.
+// Session 6c: the game starts on the world maps, so the D-pad, dialogue and warp checks run on test-map
+// (restarted first); the touch-only order walks routes pathfound over the world maps' collision grids.
 // Deterministic frame stepping like regression-suite.js. Returns a results object.
 const g = window.game; const s = g.scene.getScene('Map');
 const FRAME = 1000 / 60; let T = performance.now();
@@ -13,6 +15,7 @@ const dpad = document.getElementById('dpad'); const act = document.getElementByI
 const pe = (target, type, x, y, id) => target.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: x, clientY: y, bubbles: true, cancelable: true }));
 const R = { viewport: [innerWidth, innerHeight], touchClass: document.documentElement.classList.contains('touch') };
 try {
+  s.scene.restart({ mapId: 'test-map', spawnId: 'start' }); run(100);
   R.canvas = box(g.canvas); R.dpad = box(dpad); R.action = box(act);
   const c = g.canvas.getBoundingClientRect(), d = dpad.getBoundingClientRect(), a = act.getBoundingClientRect();
   R.dpadOverlapsGamePx = Math.max(0, Math.round(Math.min(d.right + 3, c.right) - Math.max(d.left - 3, c.left)) * (d.bottom > c.top && d.top < c.bottom ? 1 : 0));
@@ -76,25 +79,79 @@ try {
   const outside = ticketRects.filter(([, , , r]) => r[0] < cr.left - 0.5 || r[1] < cr.top - 0.5 || r[2] > cr.right + 0.5 || r[3] > cr.bottom + 0.5).length;
   R.ticketVsControls = { checked: ticketRects.length, widestGamePx: Math.max(...ticketRects.map(([, , , r]) => Math.round((r[2] - r[0]) / k))), overlapping: hitsCtl, outsideCanvas: outside, result: hitsCtl.length === 0 && outside === 0 ? 'PASS' : 'FAIL' };
 
-  // One order, touch only: Dispatcher (Action) -> D-pad into the warp -> pick up -> D-pad warp -> deliver.
+  // One order, touch only: Dispatcher (Action) -> D-pad along pathfound routes, through warps -> pick up -> deliver.
+  const MAPS = await import('/src/systems/maps.ts');
+  const grid = (mapId) => {
+    const info = MAPS.getMap(mapId); const dd = info.data; const ts = dd.tilesets.find((t) => t.name === 'tiles');
+    const solid = new Set((ts.tiles ?? []).filter((t) => t.properties?.some((p) => p.name === 'collides' && p.value === true)).map((t) => t.id + ts.firstgid));
+    const obs = dd.layers.find((l) => l.name === 'obstacles').data; const npcTiles = new Set((dd.layers.find((l) => l.name === 'npcs')?.objects ?? []).map((o) => `${Math.floor(o.x / 16)},${Math.floor((o.y - 1) / 16)}`));
+    const inside = (r, tx, ty) => tx * 16 + 8 >= r.x && tx * 16 + 8 < r.x + r.width && ty * 16 + 8 >= r.y && ty * 16 + 8 < r.y + r.height;
+    return { info, W: dd.width, H: dd.height, inside, warpAt: (tx, ty) => info.warps.find((w) => inside(w, tx, ty)), open: (tx, ty) => tx >= 0 && ty >= 0 && tx < dd.width && ty < dd.height && !solid.has(obs[ty * dd.width + tx]) && !npcTiles.has(`${tx},${ty}`) };
+  };
+  const tileAt = (x, y) => [Math.floor(x / 16), Math.floor((y - 1) / 16)];
+  const STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]]; const DIR = { '1,0': 'right', '-1,0': 'left', '0,1': 'down', '0,-1': 'up' };
+  const bfs = (G, start, isGoal) => {
+    const key = (t) => t[1] * G.W + t[0]; const prev = new Map([[key(start), null]]); const q = [start];
+    while (q.length) {
+      const cur = q.shift();
+      if (isGoal(cur)) { const path = [cur]; let k2 = prev.get(key(cur)); while (k2 !== null) { path.unshift([k2 % G.W, Math.floor(k2 / G.W)]); k2 = prev.get(k2); } return path; }
+      if (G.warpAt(...cur) && cur !== start) continue;
+      for (const [dx, dy] of STEPS) { const n = [cur[0] + dx, cur[1] + dy]; if (G.open(...n) && !prev.has(key(n))) { prev.set(key(n), key(cur)); q.push(n); } }
+    }
+    return null;
+  };
+  // D-pad held exactly 16 frames per tile, one straight run per press (1 px a frame).
+  let pid = 200; const off = { right: [0.4, 0], left: [-0.4, 0], up: [0, -0.4], down: [0, 0.4] };
+  const dpadWalk = (path) => {
+    for (let i = 0; i < path.length - 1 && !s.warping;) {
+      const step = [path[i + 1][0] - path[i][0], path[i + 1][1] - path[i][1]]; let j = i + 1;
+      while (j < path.length - 1 && path[j + 1][0] - path[j][0] === step[0] && path[j + 1][1] - path[j][1] === step[1]) j++;
+      const o = off[DIR[step.join(',')]]; pe(dpad, 'pointerdown', cx + d.width * o[0], cy + d.height * o[1], ++pid);
+      run((j - i) * 16 * 1000 / 60); pe(window, 'pointerup', cx, cy, pid); i = j;
+    }
+    for (let n = 0; n < 120 && s.warping; n++) run(1000 / 60);
+    run(1000 / 60);
+  };
+  const route = (from, to) => { const prev = new Map([[from, null]]); const q = [from]; while (q.length) { const m = q.shift(); for (const w of MAPS.getMap(m).warps) if (!prev.has(w.targetMap)) { prev.set(w.targetMap, { m, w }); q.push(w.targetMap); } } const hops = []; for (let t = to; prev.get(t); t = prev.get(t).m) hops.unshift(prev.get(t).w); return hops; };
+  // Walks to the open tile in front of a delivery point (or NPC tile) on any map, then faces it with a 1-frame D-pad tap.
+  // Facing a wall or NPC with the D-pad nudges the player up to 4 px toward it; walk back to the tile
+  // centre (1 px a frame) so the next route starts exactly on a tile.
+  const recenter = () => {
+    const [tx0, ty0] = tileAt(s.player.x, s.player.y); const ddx = tx0 * 16 + 8 - s.player.x, ddy = ty0 * 16 + 12 - s.player.y;
+    for (const [n, dir] of [[ddx, ddx > 0 ? 'right' : 'left'], [ddy, ddy > 0 ? 'down' : 'up']]) {
+      if (!n) continue; const o = off[dir]; pe(dpad, 'pointerdown', cx + d.width * o[0], cy + d.height * o[1], ++pid); run(Math.abs(n) * 1000 / 60); pe(window, 'pointerup', cx, cy, pid); run(1000 / 60);
+    }
+  };
+  const goFace = (mapId, [tx, ty]) => {
+    recenter();
+    const maps = [];
+    for (let hop = 0; s.info.id !== mapId && hop < 12; hop++) { const G = grid(s.info.id); const w = route(s.info.id, mapId)[0]; dpadWalk(bfs(G, tileAt(s.player.x, s.player.y), (t) => G.inside(w, ...t))); maps.push(s.info.id); }
+    const G = grid(mapId); let face = null;
+    const path = bfs(G, tileAt(s.player.x, s.player.y), (t) => { const f = STEPS.find(([dx, dy]) => t[0] + dx === tx && t[1] + dy === ty); if (f && !G.warpAt(...t)) face = f; return !!f && !G.warpAt(...t); });
+    dpadWalk(path);
+    // Face it: hold the D-pad toward it until flush (6 frames covers the 4 px gap).
+    { const o = off[DIR[face.join(',')]]; pe(dpad, 'pointerdown', cx + d.width * o[0], cy + d.height * o[1], ++pid); run(6 * 1000 / 60); pe(window, 'pointerup', cx, cy, pid); run(50); }
+    return { maps, facing: s.facing, wanted: DIR[face.join(',')], at: tileAt(s.player.x, s.player.y) };
+  };
   const tapThrough = (id0) => { for (let i = 0; i < 20; i++) { tap(id0 + i); if (!s.talking) return i + 1; } return -1; };
-  const dpadHold = (dir, until, id, max = 240) => { const off = { right: [0.4, 0], left: [-0.4, 0], up: [0, -0.4], down: [0, 0.4] }[dir]; pe(dpad, 'pointerdown', cx + d.width * off[0], cy + d.height * off[1], id); let i = 0; while (!until() && i++ < max) run(1000 / 60); pe(window, 'pointerup', cx, cy, id); run(50); return i; };
   const tk = () => (s.ticketText.visible ? s.ticketText.text.replace(/\n/g, ' / ') : null);
+  const pointTile = (stop) => { const p = MAPS.getMap(stop.map).deliveryPoints.find((q) => q.pointId === stop.pointId); return [p.x / 16, p.y / 16]; };
   const order = {}; s.state.reset(); s.scene.restart({}); run(100);
-  const disp = s.npcs.find((n) => n.spawn.role === 'dispatcher'); s.player.body.reset(disp.spawn.x - 16, disp.spawn.y); s.facing = 'right'; run(50);
+  const o1 = s.state.orders[0];
+  const disp = s.npcs.find((n) => n.spawn.role === 'dispatcher');
+  order.toDispatcher = goFace(s.info.id, tileAt(disp.spawn.x, disp.spawn.y));
   order.dispatcherTaps = tapThrough(30); order.assigned = [s.state.active?.order.id, s.state.active?.status, tk()];
-  s.player.body.reset(420, 96); run(50); dpadHold('right', () => s.info.id === 'roosevelt-ave' && !s.warping, 60);
+  order.toPickup = goFace(o1.pickup.map, pointTile(o1.pickup));
   order.arrived1 = [s.info.id, tk()];
-  s.player.body.reset(104, 48); run(50); dpadHold('up', () => false, 61, 20); order.pickupTaps = tapThrough(70); order.pickedUp = [s.state.active?.status, tk()];
-  s.player.body.reset(240, 48); run(50); dpadHold('up', () => s.info.id === 'diversity-plaza-74th' && !s.warping, 90);
+  order.pickupTaps = tapThrough(70); order.pickedUp = [s.state.active?.status, tk()];
+  order.toDropoff = goFace(o1.dropoff.map, pointTile(o1.dropoff));
   order.arrived2 = [s.info.id, tk()];
-  s.player.body.reset(328, 296); run(50); dpadHold('down', () => false, 91, 20); order.deliverTaps = tapThrough(100);
+  order.deliverTaps = tapThrough(100);
   order.done = [s.state.active, s.state.completed, s.state.rewardTotal, tk()];
-  order.result = order.assigned[0] === 'order-1' && order.arrived1[0] === 'roosevelt-ave' && order.arrived1[1] === order.assigned[2] && order.pickedUp[0] === 'picked-up' && order.arrived2[0] === 'diversity-plaza-74th' && order.arrived2[1] === order.pickedUp[1] && order.done[0] === null && order.done[2] === 10 && order.done[3] === null ? 'PASS' : 'FAIL';
+  const faced = [order.toDispatcher, order.toPickup, order.toDropoff].every((f) => f.facing === f.wanted);
+  order.result = faced && order.assigned[0] === 'order-1' && order.arrived1[0] === o1.pickup.map && order.arrived1[1] === order.assigned[2] && order.pickedUp[0] === 'picked-up' && order.arrived2[0] === o1.dropoff.map && order.arrived2[1] === order.pickedUp[1] && order.done[0] === null && order.done[2] === 10 && order.done[3] === null ? 'PASS' : 'FAIL';
   R.orderByTouch = order;
 } catch (e) { R.ERROR = String(e && e.stack || e); } finally {
-  s.state.reset();
-  if (s.info.id !== 'test-map' || s.warping) { s.scene.restart({}); run(100); }
-  s.facing = 'down'; s.player.body.reset(232, 268); run(50); g.loop.wake();
+  s.state.reset(); s.scene.restart({}); run(100); g.loop.wake();
 }
 R;
