@@ -9,7 +9,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "validate:world": "node scripts/validate-world.mjs",
-    "test:world": "node --test tests/world/validate-world.test.mjs"
+    "test:world": "node --test tests/world/*.test.mjs",
+    "maps:generate": "node scripts/generate-maps.mjs",
+    "maps:check": "node scripts/generate-maps.mjs --check"
   },
   "engines": {
     "node": ">=22.12.0"

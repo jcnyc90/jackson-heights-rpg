@@ -421,6 +421,23 @@ Changes from 6b's 11-map plan: the Historic District's four maps become two (the
 
 **Anchors and landmarks (6b).** 24 delivery anchors, at least two in every map, and the Dispatcher's (`rav-dispatch`, Roosevelt 74th–75th St, north side, by the 74 St station). 11 fictional landmark slots (shops, food stalls, service counters, letters A–K), no real businesses. Historic District anchors sit on plain block faces with no building names; residential blocks stay generic.
 
+### 2.15 Map generator (session 6c)
+
+`scripts/generate-maps.mjs` turns the world dataset into the Tiled maps of the split (2.14). No dependencies; it shares the grid-to-tile layout with the validator (`scripts/world-layout.mjs`).
+
+- `npm run maps:generate` writes every map. Each is written as raw JSON next to the maps and then normalized by Tiled's own writer, `tiled --export-map json`, run in `src/data/maps/` so the relative tileset paths stay put. The committed files are exactly what the Tiled GUI saves (2.4). `TILED=/path/to/tiled` picks another binary.
+- `npm run maps:check` regenerates every map next to the committed ones and fails on any byte difference. It needs Tiled; `npm run test:world` also compares the generator's raw output with the committed maps without Tiled, so a hand edit or a stale map fails either way.
+- **Don't edit generated maps in Tiled.** Change the dataset or the generator and regenerate. Each generated map carries a map property `generatedBy` saying so. The test map stays hand-made.
+
+**What it draws (all Claude's choices within the locked look and the existing placeholder tiles).**
+
+- **Corridors.** Each segment is a corridor of its street's half-width (`layout.halfWidth`): road tiles inside, a one-tile sidewalk ring, or all sidewalk tiles for `use: plaza`. A segment end reaches past its node by the widest crossing street there, not at all where its own street just continues, and by its own half-width at a dead end. Road beats plaza beats sidewalk where corridors overlap, except a road's end reaching into a crossing plaza, which gives way to it (so the 34th Ave paseo stays continuous). Broadway is drawn as a capsule along its diagonal.
+- **Blocks.** Everything else is buildings (wall tiles). In the Historic District, blocks are garden courts: a frontage wall along the street with grass and trees behind it (unreachable scenery).
+- **Dressing**, only on tiles covered by exactly one corridor (never in a crossing) and off stubs, spawns and anchors: elevated-7 pillars (wall tiles) in two rows inside Roosevelt Ave every 4 tiles; a dashed centre line on 6-wide roads; planters every 3 tiles along the edges of 4-wide plazas and trees (canopy one tile north, in `above`) every 6 tiles along wider ones. Patterns use global tile coordinates, so they line up across map seams. The mouths of streets that only meet Roosevelt Ave (Baxter, Forley, Elbertson, Britton, Case) are short dead-end notches. Stations aren't drawn yet (no placeholder tile for stairs).
+- **Links.** Every open zone connection and every map-connection node becomes a warp pair. Each end is a **stub**: a 4-tile-wide street running `stubLength` (3) tiles past the corridor at that node, with the spawn on its first tile (facing back toward the node) and the warp on its last. The stub's direction is, in order of preference: a way the other map's street leaves the node that also continues one of this map's streets; a straight continuation of this map's street; any way the other map's street leaves. The first of those whose tiles and one-tile border are free of other corridors and inside the map wins. Map connections are placed before zone connections. Spawn ids are `from-<other map>-<node>`, warp names `to-<other map>-<node>`. Walls get nothing: the street just ends.
+- **Anchors.** From the anchor's point on its segment's centre line (`t`), the generator walks toward its side to the first building tile, which becomes a `deliveryPoint` (`pointId` = anchor id); the player faces it from the tile before. If a stub or spawn is in the way, the anchor slides along its segment to the nearest free tile (this moves `rav-86-1`, on the 3-tile block from 86th St to Elbertson St). The Dispatcher's anchor gets the `dispatcher` NPC on that tile instead, facing the street.
+- **Start.** The `start` spawn is mid-block on Roosevelt Ave 74th–75th St, near the Dispatcher, facing up.
+
 ---
 
 ## 3. Roadmap
