@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { DIRECTIONS, FONT, PLAYER_FRAME, TEXTURES } from '../config';
 import { generatePlaceholderTextures } from '../systems/placeholderArt';
+import { generatePropTextures } from '../systems/worldArt';
 import { registerFont } from '../systems/font';
 import { MAP_LIST, validateLinks } from '../systems/maps';
 
@@ -11,8 +12,9 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
-    // Maps are bundled with the code; the loader accepts parsed Tiled JSON directly.
-    for (const map of MAP_LIST) this.load.tilemapTiledJSON(map.id, map.data);
+    // Bundled maps go through Phaser's Tiled loader (it accepts parsed JSON). The world map is
+    // external and already decoded (main.ts, mapLoader.ts); WorldView draws it.
+    for (const map of MAP_LIST) if (!map.world) this.load.tilemapTiledJSON(map.id, map.data);
     // Spleen 6x12 atlas (bundled with the game, never hotlinked; see src/systems/font.ts).
     this.load.image(FONT.key, FONT.atlas);
     // Real art goes here, e.g.:
@@ -22,6 +24,7 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     generatePlaceholderTextures(this);
+    generatePropTextures(this);
     registerFont(this);
 
     // Walk cycle per direction: step A, stand, step B, stand (frame = row * columns + col).

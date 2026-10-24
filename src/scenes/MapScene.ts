@@ -1,15 +1,15 @@
 import Phaser from 'phaser';
-import tileIds from '../data/tiles.json';
 import {
   DIRECTIONS,
   FONT,
   GAME_HEIGHT,
   GAME_WIDTH,
-  MINIMAP,
+  HUD_BOX,
   ORDER_TICKET,
   PLAYER_FEET,
   PLAYER_FRAME,
   PLAYER_SPEED,
+  RADAR,
   STEP,
   TALK_RANGE,
   TARGET_ARROW,
@@ -25,7 +25,9 @@ import { gameState } from '../systems/gameState';
 import { insideWarp, resolveDestination, START, type DeliveryPoint, type MapInfo, type Warp } from '../systems/maps';
 import { DIALOGUE, readNpcSpawns, type NpcSpawn } from '../systems/npcs';
 import { orderParams, placeName } from '../systems/orders';
+import { Radar } from '../systems/radar';
 import { t } from '../systems/strings';
+import { WorldView } from '../systems/worldView';
 import type { DialogueData, DialogueScene } from './DialogueScene';
 
 const VELOCITY: Record<Direction, { x: number; y: number }> = {
@@ -39,14 +41,14 @@ const OPPOSITE: Record<Direction, Direction> = { up: 'down', down: 'up', left: '
 
 const EMOTE_MS = 500;
 const NAME_CARD_MS = ZONE_CARD.showMs;
-/** Whole pixels per 60 Hz physics step at walking speed (PLAYER_SPEED / 60). */
+/** Pixels per 60 Hz physics step at walking speed (PLAYER_SPEED / 60 = 2.5; whole pixels via the accumulator). */
 const STEP_PX = PLAYER_SPEED / 60;
-// Sprites sort by feet y (their depth). "ground" and "obstacles" stay below them, street signs just
-// above those; "above" (tree canopies, awnings) draws over every sprite, then the HUD.
-const DEPTH = { ground: -2, obstacles: -1, signs: -0.5, above: 5e5, emote: 1e6, arrow: 1.4e6, ticket: 1.5e6, minimap: 1.6e6, nameCard: 2e6 } as const;
+// Sprites sort by feet y (their depth): characters, and on the world map buildings, trees, posts
+// and signs too. "ground" and "obstacles" stay below them; "above" (tree canopies on the test map)
+// draws over every sprite, then the HUD.
+const DEPTH = { ground: -2, obstacles: -1, above: 5e5, emote: 1e6, arrow: 1.4e6, ticket: 1.5e6, radar: 1.6e6, corner: 1.7e6, nameCard: 2e6 } as const;
 // HUD colours (EarthBound-ish pastels on the dark outline colour).
-const HUD = { box: 0x2a1f3d, sign: 0x2f6b4f, mapBlock: 0x2a1f3d, mapRoad: 0xd9d9df, mapEl: 0x9f9fb4, mapPlaza: 0xf3dfb6, mapFrame: 0xfffaf0, player: 0xff6f61, target: 0xffd46e, dispatcher: 0x6fcfc4 } as const;
-const SIGN_PAD = 2;
+const HUD = { box: 0x2a1f3d } as const;
 
 interface Npc {
   spawn: NpcSpawn;
@@ -76,16 +78,18 @@ export interface MapSceneData {
  * with spawn points, warps and delivery points, and an optional object layer "npcs" (see readNpcSpawns).
  * Generated maps (2.15) add street signs, zone areas and a walkable area (see readExtras).
  *
- * Movement (session 6d): eight directions at 2 px per physics step; diagonals step each axis by
- * 1 or 2 px so their speed averages the same, and slide along walls at full speed.
+ * Movement (session 6d, 150 px/s since 6e): eight directions at 2.5 px per physics step in whole
+ * pixels (2 or 3); diagonals step each axis by 1 or 2 px so their speed averages the same, and slide
+ * along walls at full speed.
  *
  * A warp fades out, restarts this scene on the target map, and fades in. Input is locked
  * from the step onto the warp until the fade-in ends, and presses held across it go stale.
  *
  * Delivery orders (DESIGN.md 2.13): talking to a dispatcher NPC assigns the next order, and
  * Action at a delivery point picks it up or delivers it. Order state lives in gameState, which
- * survives the restart; the order ticket is rebuilt from it on every map. Wayfinding (6d): a
- * minimap, an edge arrow toward an off-screen target, a beacon over it, and zone name cards.
+ * survives the restart; the order ticket is rebuilt from it on every map. Wayfinding (6e): a
+ * radar, the corner name at crossings, an edge arrow toward an off-screen target, a beacon over
+ * it, and zone name cards. The world map draws through WorldView (chunked; see worldView.ts).
  */
 export class MapScene extends Phaser.Scene {
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
@@ -110,8 +114,14 @@ export class MapScene extends Phaser.Scene {
   private warping = false;
   /** Warps fire only after the player has stood off every warp (so arrival can't bounce back). */
   private warpArmed = false;
-  // Wayfinding (absent on maps without a walkable area, like the test map).
-  private minimap: { image: Phaser.GameObjects.Image; ox: number; oy: number; width: number; height: number; player: Phaser.GameObjects.Rectangle; target: Phaser.GameObjects.Rectangle; dispatcher: Phaser.GameObjects.Rectangle } | null = null;
+  /** The world map's renderer (null on bundled maps like the test map). */
+  world: WorldView | null = null;
+  // Wayfinding (world map only): the radar, the corner name at crossings.
+  radar: Radar | null = null;
+  private cornerBox: Phaser.GameObjects.Rectangle | null = null;
+  private cornerText: Phaser.GameObjects.BitmapText | null = null;
+  /** The crossing the player stands in, as shown by the corner HUD ("78th St & 37th Ave"), or null. */
+  cornerShown: string | null = null;
   private arrow!: Phaser.GameObjects.Sprite;
   private beacon!: Phaser.GameObjects.Image;
   /** Zone index + 1 per tile (0 = none), from the map's zone areas; the map's width in tiles. */
@@ -134,7 +144,11 @@ export class MapScene extends Phaser.Scene {
     this.moveDir = null;
     this.acc = { x: 0, y: 0 };
     this.planned = { x: 0, y: 0 };
-    this.minimap = null;
+    this.world = null;
+    this.radar = null;
+    this.cornerBox = null;
+    this.cornerText = null;
+    this.cornerShown = null;
     this.zoneShown = null;
     this.zoneSeen = { id: null, since: 0 };
     this.nameCard = [];
@@ -145,29 +159,42 @@ export class MapScene extends Phaser.Scene {
     this.info = info;
     this.facing = spawn.facing;
 
-    const map = this.make.tilemap({ key: info.id });
-    // Phaser drops external (.tsx/.tsj) tilesets with only a console warning.
-    if (map.tilesets.length === 0) throw new Error(`Map "${info.id}" has no embedded tileset (embed it in Tiled)`);
-    // Convention: each Tiled tileset is named after the texture key that draws it.
-    const tilesets = map.tilesets.map((ts) => {
-      const tileset = map.addTilesetImage(ts.name);
-      if (!tileset) throw new Error(`No texture loaded for tileset "${ts.name}"`);
-      return tileset;
-    });
-    const ground = map.createLayer('ground', tilesets);
-    const obstacles = map.createLayer('obstacles', tilesets);
-    if (!ground || !obstacles) throw new Error(`Map "${info.id}" needs "ground" and "obstacles" tile layers`);
-    ground.setDepth(DEPTH.ground);
-    obstacles.setDepth(DEPTH.obstacles);
-    obstacles.setCollisionByProperty({ collides: true });
-    // Optional; never collides (collision lives in "obstacles").
-    if (map.getLayerIndex('above') !== null) map.createLayer('above', tilesets)?.setDepth(DEPTH.above);
+    // The world map (external, decoded at startup) draws through WorldView; bundled maps through
+    // Phaser's Tiled loader. Either way the player collides with one tile layer.
+    let map: Phaser.Tilemaps.Tilemap;
+    let obstacles: Phaser.Tilemaps.TilemapLayer;
+    if (info.world) {
+      this.world = new WorldView(this, info, info.world, { ground: DEPTH.ground, collision: DEPTH.obstacles });
+      map = this.world.map;
+      obstacles = this.world.collision;
+    } else {
+      map = this.make.tilemap({ key: info.id });
+      // Phaser drops external (.tsx/.tsj) tilesets with only a console warning.
+      if (map.tilesets.length === 0) throw new Error(`Map "${info.id}" has no embedded tileset (embed it in Tiled)`);
+      // Convention: each Tiled tileset is named after the texture key that draws it.
+      const tilesets = map.tilesets.map((ts) => {
+        const tileset = map.addTilesetImage(ts.name);
+        if (!tileset) throw new Error(`No texture loaded for tileset "${ts.name}"`);
+        return tileset;
+      });
+      const ground = map.createLayer('ground', tilesets);
+      const obs = map.createLayer('obstacles', tilesets);
+      if (!ground || !obs) throw new Error(`Map "${info.id}" needs "ground" and "obstacles" tile layers`);
+      ground.setDepth(DEPTH.ground);
+      obs.setDepth(DEPTH.obstacles);
+      obs.setCollisionByProperty({ collides: true });
+      obstacles = obs as Phaser.Tilemaps.TilemapLayer;
+      // Optional; never collides (collision lives in "obstacles").
+      if (map.getLayerIndex('above') !== null) map.createLayer('above', tilesets)?.setDepth(DEPTH.above);
+    }
+    const mapWidth = info.world ? info.world.width * TILE_SIZE : map.widthInPixels;
+    const mapHeight = info.world ? info.world.height * TILE_SIZE : map.heightInPixels;
 
     this.player = this.addCharacter(spawn.x, spawn.y, TEXTURES.player, this.standFrame());
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, obstacles);
 
-    this.npcs = readNpcSpawns(map).map((npcSpawn) => {
+    this.npcs = readNpcSpawns(info.world ? (info.data as Parameters<typeof readNpcSpawns>[0]) : map).map((npcSpawn) => {
       const sprite = this.addCharacter(npcSpawn.x, npcSpawn.y, TEXTURES.npc, this.npcFrame(npcSpawn, npcSpawn.facing));
       // NPCs never move: the player stops against them and can't push them.
       sprite.body.setImmovable(true);
@@ -179,11 +206,13 @@ export class MapScene extends Phaser.Scene {
       this.npcs.map((npc) => npc.sprite),
     );
 
-    // Delivery point markers sit on their rectangle's bottom edge and sort like sprites.
+    // Delivery point markers sit on their rectangle's bottom edge and sort like sprites. On the world
+    // map the door belongs to a building sprite: the marker draws just over that building.
     for (const p of info.deliveryPoints) {
-      this.add.image(p.x + p.width / 2, p.y + p.height, TEXTURES.deliveryPoint).setOrigin(0.5, 1).setDepth(p.y + p.height);
+      const b = info.world?.buildings.find((x) => p.x >= x.x * TILE_SIZE && p.x < (x.x + x.w) * TILE_SIZE && p.y >= x.y * TILE_SIZE && p.y < (x.y + x.h) * TILE_SIZE);
+      const depth = b ? (b.y + b.h) * TILE_SIZE + 0.5 : p.y + p.height;
+      this.add.image(p.x + p.width / 2, p.y + p.height, TEXTURES.deliveryPoint).setOrigin(0.5, 1).setDepth(depth);
     }
-    this.addStreetSigns();
 
     this.emote = this.add.image(0, 0, TEXTURES.emote).setOrigin(0.5, 1).setVisible(false).setDepth(DEPTH.emote);
     this.beacon = this.add.image(0, 0, TEXTURES.beacon).setOrigin(0.5, 1).setVisible(false).setDepth(DEPTH.emote - 1);
@@ -196,10 +225,15 @@ export class MapScene extends Phaser.Scene {
     // maps the area is at least half a screen inside every edge, so the camera never stops scrolling.
     const { walk } = info;
     this.physics.world.setBounds(walk.x, walk.y, walk.width, walk.height);
-    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+    this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
     this.cameras.main.startFollow(this.player, true);
-    if (walk.width < map.widthInPixels || walk.height < map.heightInPixels) this.buildMinimap(map);
-    this.buildZoneGrid(map);
+    if (info.world) {
+      this.world?.update(spawn.x, spawn.y, true);
+      this.radar = new Radar(this, info.world, walk, RADAR.margin, RADAR.margin, DEPTH.radar);
+      this.cornerBox = this.add.rectangle(0, 0, 0, 0, HUD.box).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.corner).setVisible(false);
+      this.cornerText = this.add.bitmapText(0, 0, FONT.key, '').setScrollFactor(0).setDepth(DEPTH.corner + 1).setVisible(false);
+    }
+    this.buildZoneGrid(mapWidth / TILE_SIZE, mapHeight / TILE_SIZE);
 
     // Each physics step consumes the planned step; plan the next one right after it.
     // (Keep the world: by SHUTDOWN, this.physics.world has already been cleared.)
@@ -270,12 +304,14 @@ export class MapScene extends Phaser.Scene {
     // after update), so read the body to avoid trailing the player by a frame.
     const { body } = this.player;
     this.player.setDepth(body.bottom);
+    this.world?.update(body.center.x, body.bottom);
     if (this.emote.visible) {
       this.emote.setPosition(body.center.x, body.bottom - PLAYER_FRAME.height - 1);
       if (time >= this.emoteHideAt) this.emote.setVisible(false);
     }
     if (this.ticketBox.visible) this.placeTicket();
     this.updateWayfinding(time);
+    this.updateCorner();
     this.updateZone(time);
   }
 
@@ -346,19 +382,23 @@ export class MapScene extends Phaser.Scene {
     });
   }
 
-  /** A name (a map's or a zone's) in the top-left corner for a moment. */
+  /** A HUD box at the top right, `row` boxes down (0 = the corner name, 1 = the zone card). */
+  private hudBoxAt(row: number, text: string): { x: number; y: number; width: number; height: number } {
+    const { margin, pad, gap } = HUD_BOX;
+    const width = [...text].length * FONT.charWidth + 2 * pad;
+    const height = FONT.lineHeight + 2 * pad;
+    return { x: GAME_WIDTH - margin - width, y: margin + row * (height + gap), width, height };
+  }
+
+  /** A name (a map's or a zone's) at the top right, under the corner name, for a moment. */
   private showNameCard(name: string): void {
     for (const o of this.nameCard) o.destroy();
-    const pad = 3;
+    const r = this.hudBoxAt(this.radar ? 1 : 0, name);
     const text = this.add
-      .bitmapText(4 + pad, 4 + pad, FONT.key, name)
+      .bitmapText(r.x + HUD_BOX.pad, r.y + HUD_BOX.pad, FONT.key, name)
       .setScrollFactor(0)
       .setDepth(DEPTH.nameCard + 1);
-    const box = this.add
-      .rectangle(4, 4, [...name].length * FONT.charWidth + 2 * pad, FONT.lineHeight + 2 * pad, HUD.box)
-      .setOrigin(0)
-      .setScrollFactor(0)
-      .setDepth(DEPTH.nameCard);
+    const box = this.add.rectangle(r.x, r.y, r.width, r.height, HUD.box).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.nameCard);
     this.nameCard = [text, box];
     this.time.delayedCall(NAME_CARD_MS, () => {
       text.destroy();
@@ -366,93 +406,27 @@ export class MapScene extends Phaser.Scene {
     });
   }
 
-  /** Street-name signs at intersections: two lines on a dark green plate, one corner at the sign's point. */
-  private addStreetSigns(): void {
-    for (const sign of this.info.signs) {
-      const lines = [t(sign.street), t(sign.cross)];
-      const width = Math.max(...lines.map((l) => [...l].length)) * FONT.charWidth + 2 * SIGN_PAD;
-      const height = lines.length * FONT.lineHeight + 2 * SIGN_PAD;
-      const x = sign.align.endsWith('e') ? sign.x - width : sign.x;
-      const y = sign.align.startsWith('s') ? sign.y - height : sign.y;
-      this.add.rectangle(x, y, width, height, HUD.sign).setOrigin(0).setDepth(DEPTH.signs);
-      this.add.bitmapText(x + SIGN_PAD, y + SIGN_PAD, FONT.key, lines.join('\n')).setDepth(DEPTH.signs + 0.01);
-    }
-  }
-
-  /**
-   * The minimap: every walkable tile of the map's walkable area, MINIMAP.pixelsPer px per
-   * MINIMAP.tilesPer tiles (one short block = 3 px), drawn once into a canvas texture. Streets
-   * light, blocks dark; plazas and the el in their own colours.
-   */
-  private buildMinimap(map: Phaser.Tilemaps.Tilemap): void {
-    const { walk } = this.info;
-    const tw = map.tileWidth;
-    // One tile in from the walkable area's corner, so the 4-tile streets fall on single pixel columns.
-    const ox = walk.x / tw + 1;
-    const oy = walk.y / tw + 1;
-    const mm = (tile: number, o: number) => Math.floor(((tile + 0.5 - o) * MINIMAP.pixelsPer) / MINIMAP.tilesPer);
-    const width = mm(walk.x / tw + walk.width / tw - 1, ox) + 1;
-    const height = mm(walk.y / tw + walk.height / tw - 1, oy) + 1;
-    const key = `${TEXTURES.minimap}-${this.info.id}`;
-    if (!this.textures.exists(key)) {
-      const tex = this.textures.createCanvas(key, width + 2, height + 2);
-      if (!tex) throw new Error('Could not create the minimap texture');
-      const ctx = tex.getContext();
-      const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
-      ctx.fillStyle = hex(HUD.mapFrame);
-      ctx.fillRect(0, 0, width + 2, height + 2);
-      ctx.fillStyle = hex(HUD.mapBlock);
-      ctx.fillRect(1, 1, width, height);
-      const first = map.tilesets.find((ts) => ts.name === TEXTURES.tiles)?.firstgid ?? 1;
-      // Buildings stand on sidewalk ground tiles; their obstacle tile marks them as blocks.
-      const BUILDING = new Set(['wall', 'roof', 'roof-edge', 'storefront', 'house', 'station']);
-      const kind = (groundGid: number, obstacleGid: number) => {
-        if (BUILDING.has(tileIds.tiles[obstacleGid - first])) return 0;
-        const name = tileIds.tiles[groundGid - first];
-        if (name === 'plaza' || name === 'paseo') return 3;
-        if (name === 'el-shadow') return 2;
-        return name === 'road' || name === 'sidewalk' || name?.startsWith('curb') || name?.startsWith('center-line') || name?.startsWith('lane-dash') || name?.startsWith('crosswalk') ? 1 : 0;
-      };
-      const best = new Uint8Array(width * height);
-      const groundData = map.getLayer('ground')?.data ?? [];
-      const obstacleData = map.getLayer('obstacles')?.data ?? [];
-      for (let ty = walk.y / tw; ty < (walk.y + walk.height) / tw; ty++) {
-        for (let tx = walk.x / tw; tx < (walk.x + walk.width) / tw; tx++) {
-          const k = kind(groundData[ty]?.[tx]?.index ?? 0, obstacleData[ty]?.[tx]?.index ?? 0);
-          const px = Math.max(0, mm(tx, ox));
-          const py = Math.max(0, mm(ty, oy));
-          if (k > best[py * width + px]) best[py * width + px] = k;
-        }
-      }
-      const colours = [0, HUD.mapRoad, HUD.mapEl, HUD.mapPlaza];
-      best.forEach((k, i) => {
-        if (!k) return;
-        ctx.fillStyle = hex(colours[k]);
-        ctx.fillRect(1 + (i % width), 1 + Math.floor(i / width), 1, 1);
-      });
-      tex.refresh();
-    }
-    const x = GAME_WIDTH - MINIMAP.margin - (width + 2);
-    const image = this.add.image(x, MINIMAP.margin, key).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.minimap);
-    const marker = (colour: number, depth: number) => this.add.rectangle(0, 0, MINIMAP.marker, MINIMAP.marker, colour).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.minimap + depth);
-    this.minimap = { image, ox, oy, width, height, dispatcher: marker(HUD.dispatcher, 1), target: marker(HUD.target, 2), player: marker(HUD.player, 3) };
-  }
-
-  /** The minimap pixel (relative to its inner top-left) of a map position, clamped to the minimap. */
-  minimapPixel(x: number, y: number): [number, number] {
-    const m = this.minimap;
-    if (!m) return [0, 0];
-    const px = Math.floor(((x / TILE_SIZE - m.ox) * MINIMAP.pixelsPer) / MINIMAP.tilesPer);
-    const py = Math.floor(((y / TILE_SIZE - m.oy) * MINIMAP.pixelsPer) / MINIMAP.tilesPer);
-    return [Phaser.Math.Clamp(px, 0, m.width - 1), Phaser.Math.Clamp(py, 0, m.height - 1)];
+  /** Corner name (owner's decision 6): "78th St & 37th Ave" at the top right while the player stands in a crossing. */
+  private updateCorner(): void {
+    if (!this.cornerBox || !this.cornerText) return;
+    const { center, bottom } = this.player.body;
+    const c = this.talking ? undefined : this.info.corners.find((r) => center.x >= r.x && center.x < r.x + r.width && bottom - 1 >= r.y && bottom - 1 < r.y + r.height);
+    const name = c ? t('place.corner', { street: t(c.street), cross: t(c.cross) }) : null;
+    if (name === this.cornerShown) return;
+    this.cornerShown = name;
+    this.cornerBox.setVisible(!!name);
+    this.cornerText.setVisible(!!name);
+    if (!name) return;
+    const r = this.hudBoxAt(0, name);
+    this.cornerBox.setPosition(r.x, r.y).setSize(r.width, r.height);
+    this.cornerText.setText(name).setPosition(r.x + HUD_BOX.pad, r.y + HUD_BOX.pad);
   }
 
   /** Zone index + 1 per tile, first area first; crossings are in no area, so they keep the last zone. */
-  private buildZoneGrid(map: Phaser.Tilemaps.Tilemap): void {
-    const w = map.width;
+  private buildZoneGrid(w: number, h: number): void {
     this.mapWidth = w;
     this.zoneIds = [...new Set(this.info.zones.map((z) => z.zoneId))];
-    this.zoneGrid = new Uint8Array(w * map.height);
+    this.zoneGrid = new Uint8Array(w * h);
     for (const z of this.info.zones) {
       const n = this.zoneIds.indexOf(z.zoneId) + 1;
       for (let ty = z.y / TILE_SIZE; ty < (z.y + z.height) / TILE_SIZE; ty++) {
@@ -495,37 +469,26 @@ export class MapScene extends Phaser.Scene {
     return d ? { x: d.sprite.x - PLAYER_FRAME.width / 2, y: d.sprite.y - PLAYER_FRAME.height, width: PLAYER_FRAME.width, height: PLAYER_FRAME.height } : null;
   }
 
-  /** Minimap markers, the beacon over the target, and the edge arrow while the target is off-screen. */
+  /** The radar, the beacon over the target, and the edge arrow while the target is off-screen. */
   private updateWayfinding(time: number): void {
     const target = this.target();
-    const blinkOn = Math.floor(time / MINIMAP.blinkMs) % 2 === 0;
+    const blinkOn = Math.floor(time / RADAR.blinkMs) % 2 === 0;
     // Beacon: bobs 1 px every 250 ms above the target (whole pixels).
     this.beacon.setVisible(!!target && !this.talking);
     if (target) this.beacon.setPosition(Math.round(target.x + target.width / 2), target.y - 2 - (Math.floor(time / 250) % 2));
 
-    const m = this.minimap;
-    if (m) {
-      const shown = !this.talking;
-      const place = (r: Phaser.GameObjects.Rectangle, x: number, y: number) => {
-        const [px, py] = this.minimapPixel(x, y);
-        r.setPosition(m.image.x + 1 + px - 1, m.image.y + 1 + py - 1);
-      };
-      m.image.setVisible(shown);
-      place(m.player, this.player.x, this.player.y - 1);
-      m.player.setVisible(shown);
-      const d = this.npcs.find((n) => n.spawn.role === 'dispatcher');
-      m.dispatcher.setVisible(shown && !!d);
-      if (d) place(m.dispatcher, d.sprite.x, d.sprite.y - 1);
-      const active = !!this.state.active && !!target;
-      m.target.setVisible(shown && active && blinkOn);
-      if (active && target) place(m.target, target.x + target.width / 2, target.y + target.height - 1);
+    if (this.radar) {
+      this.radar.setVisible(!this.talking);
+      const { center, bottom } = this.player.body;
+      const dir = this.moveDir ?? this.facing;
+      this.radar.update(center.x, bottom - 1, dir, target ? { x: target.x + target.width / 2, y: target.y + target.height / 2 } : null, blinkOn);
     }
 
-    // Edge arrow: only on maps with a minimap (the world map), toward a target that's off-screen.
+    // Edge arrow: only on the world map, toward a target that's off-screen.
     const cam = this.cameras.main;
     const view = new Phaser.Geom.Rectangle(cam.scrollX, cam.scrollY, GAME_WIDTH, GAME_HEIGHT);
     const offScreen = !!target && !Phaser.Geom.Rectangle.Overlaps(view, new Phaser.Geom.Rectangle(target.x, target.y, target.width, target.height));
-    this.arrow.setVisible(!!m && offScreen && !this.talking);
+    this.arrow.setVisible(!!this.radar && offScreen && !this.talking);
     if (!this.arrow.visible || !target) return;
     const [x, y, frame] = this.arrowPlacement(target);
     this.arrow.setFrame(frame).setPosition(x, y);
@@ -534,7 +497,7 @@ export class MapScene extends Phaser.Scene {
   /**
    * The edge arrow's top-left and frame: on the screen edge (TARGET_ARROW.inset inside it) where
    * the line from the player to the target leaves the screen, pointing along that line, and moved
-   * off the minimap and the order ticket if it lands on them.
+   * off the radar, the corner name and the order ticket if it lands on them.
    */
   arrowPlacement(target: Target): [number, number, number] {
     const cam = this.cameras.main;
@@ -554,8 +517,14 @@ export class MapScene extends Phaser.Scene {
       const b = o.getBounds();
       return x < b.right && x + size > b.x && y < b.bottom && y + size > b.y ? b : null;
     };
-    const mm = this.minimap && hits(this.minimap.image);
-    if (mm) y = Math.ceil(mm.bottom) + 1;
+    const rd = this.radar && hits(this.radar.image);
+    if (rd) {
+      // Off the radar: below it on the left edge, else to its right on the top edge.
+      if (x <= rd.right && y < rd.bottom && x <= x0) y = Math.ceil(rd.bottom) + 1;
+      else x = Math.ceil(rd.right) + 1;
+    }
+    const cb = this.cornerBox && hits(this.cornerBox);
+    if (cb) y = Math.ceil(cb.bottom) + 1;
     const tk = hits(this.ticketBox);
     if (tk) y = tk.y < GAME_HEIGHT / 2 ? Math.ceil(tk.bottom) + 1 : Math.floor(tk.y) - size - 1;
     return [x, y, frame];

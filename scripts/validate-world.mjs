@@ -21,8 +21,11 @@ const ANCHOR_USES = ['pickup', 'dropoff', 'dispatcher'];
 const SIDES = { ns: ['east', 'west'], ew: ['north', 'south'], diagonal: ['north', 'south'] };
 // What a block face shows (schema 5, session 6e; owner's decision 11), from PLUTO land use.
 export const LAND_USES = ['commercial', 'walkup', 'garden-coop', 'house', 'park', 'parking', 'civic'];
-// Longest side of the map, in 16x16 tiles (DESIGN.md 2.14; 64 per map in 6c's split, 256 for 6d's one map).
-export const MAX_MAP_SIDE = 256;
+// The walkable area's size, as walking time at walking speed (owner's stop conditions in session 6e:
+// a full east-west walk at most 60 s, a full north-south walk at most 45 s, at 150 px/s). Replaces
+// 6d's 256-tiles-a-side cap, which was about bundling one Phaser tilemap of the whole map: since 6e
+// the map is an external file drawn through a small window (src/systems/worldView.ts).
+export const WALK_LIMITS = { pxPerSecond: 150, eastWestSeconds: 60, northSouthSeconds: 45, tile: 16 };
 
 /**
  * Checks one parsed dataset. Returns { errors, warnings, unverified } as string arrays;
@@ -221,10 +224,12 @@ export function validateWorld(data) {
     for (const old of ['zone', 'segments']) if (old in m) err(`map "${m.id}": ${old} is retired in schema 4 (the map covers every segment)`);
     if (!Array.isArray(m.tiles) || m.tiles.length !== 2 || !m.tiles.every((n) => Number.isInteger(n) && n > 0)) err(`map "${m.id}": tiles must be [width, height] positive integers`);
     else {
-      if (Math.max(...m.tiles) > MAX_MAP_SIDE) err(`map "${m.id}": ${m.tiles.join('x')} tiles is longer than ${MAX_MAP_SIDE} on a side`);
       if (layoutOk && nodes.size > 0 && [...nodes.values()].every((n) => Array.isArray(n.grid))) {
-        const { map: box } = mapBoxes(data.layout, [...nodes.values()]);
+        const { map: box, walk } = mapBoxes(data.layout, [...nodes.values()]);
         if (m.tiles[0] !== box.width || m.tiles[1] !== box.height) err(`map "${m.id}": tiles ${m.tiles.join('x')} don't match the layout (${box.width}x${box.height})`);
+        const secs = (tiles) => (tiles * WALK_LIMITS.tile) / WALK_LIMITS.pxPerSecond;
+        if (secs(walk.width) > WALK_LIMITS.eastWestSeconds) err(`map "${m.id}": the walkable area is ${walk.width} tiles wide, ${secs(walk.width).toFixed(1)} s to walk at ${WALK_LIMITS.pxPerSecond} px/s (limit ${WALK_LIMITS.eastWestSeconds} s)`);
+        if (secs(walk.height) > WALK_LIMITS.northSouthSeconds) err(`map "${m.id}": the walkable area is ${walk.height} tiles tall, ${secs(walk.height).toFixed(1)} s to walk at ${WALK_LIMITS.pxPerSecond} px/s (limit ${WALK_LIMITS.northSouthSeconds} s)`);
       }
     }
   }

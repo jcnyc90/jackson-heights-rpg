@@ -28,9 +28,9 @@ export default defineConfig({
   plugins: [htmlStrings()],
   build: {
     // Phaser 4 alone is ~1.4 MB minified, so the default 500 kB warning would fire on every build.
-    // Session 6d's one world map adds ~0.2 MB raw (~10 kB gzip: its tile arrays compress well), so the
-    // limit is 2000 kB; lazy-loading the map is the fix if the world grows much more.
-    chunkSizeWarningLimit: 2000,
+    // Since session 6e the world map is an external file (public/assets/maps), not bundled, so the
+    // game chunk is back under this project's original limit (6d had raised it to 2000 kB).
+    chunkSizeWarningLimit: 1500,
     rolldownOptions: {
       output: {
         // Minification strips Phaser's per-file licence comments; this banner is added after

@@ -4,10 +4,8 @@ export const GAME_WIDTH = 256;
 export const GAME_HEIGHT = 224;
 
 export const TILE_SIZE = 16;
-// 120 px/s = exactly 2 px per 60 Hz physics step, so the map scrolls evenly (90 would
-// alternate 1/2 px steps and shimmer). Use whole multiples of 60 for other speeds. Session 6d
-// doubled it from 60 (owner's decision: faster walking). Diagonals move each axis by 1 or 2 px
-// a step so the speed along the diagonal averages the same 2 px (see MapScene.planStep).
+// Walking speed in px/s: 120 = exactly 2 px per 60 Hz physics step (session 6d). Diagonals move each
+// axis by 1 or 2 px a step so their speed averages the same (see MapScene.planStep).
 export const PLAYER_SPEED = 120;
 export const BG_COLOR = '#1b1528';
 
@@ -28,7 +26,6 @@ export const TEXTURES = {
   deliveryPoint: 'delivery-point',
   targetArrow: 'target-arrow',
   beacon: 'target-beacon',
-  minimap: 'minimap',
 } as const;
 
 /** Each half of a warp's fade (out, then in on the next map). Input is locked throughout. */
@@ -81,20 +78,22 @@ export const FONT = { key: TEXTURES.font, atlas: 'assets/fonts/spleen-6x12.png',
 export const TEXT_WINDOW = { margin: 8, width: 240, height: 56, padX: 10, padY: 8 } as const;
 
 /**
- * Order ticket, centred horizontally, in screen pixels. Since session 6d it sits `margin` px
- * from the bottom (the top right is the minimap's), or `top` px from the top while the player is
- * under it (only on maps where the camera can stop scrolling, like the test map: on the world map
- * the player always stays mid-screen). Text starts `pad` px inside the box. The touch controls
- * never cover it in either place (touch-check.js checks every order's ticket at both positions).
+ * Order ticket, centred horizontally, in screen pixels: `margin` px from the bottom, or `top` px from
+ * the top while the player is under it (only on maps where the camera can stop scrolling, like the
+ * test map: on the world map the player always stays mid-screen). Text starts `pad` px inside the box.
+ * The touch controls never cover it in either place (touch-check.js checks every order's ticket).
  */
 export const ORDER_TICKET = { top: 24, margin: 4, pad: 3 } as const;
 
 /**
- * Minimap (session 6d), top-right corner, `margin` px from the edges, 1 px frame. One minimap
- * pixel covers `tilesPer / pixelsPer` tiles (10/3: one short block = 3 px). Markers are
- * `marker` px squares centred on their pixel. Hidden while the text window is open.
+ * Radar (session 6e, owner's decision 8): circular, top-left, `margin` px from the edges, north up,
+ * centred on the player. One radar pixel = `tilesPerPixel` tiles square; `radius` px (60 tiles = two
+ * short blocks). The target blip blinks every `blinkMs` while clamped to the rim. Hidden during dialogue.
  */
-export const MINIMAP = { margin: 4, pixelsPer: 3, tilesPer: 10, marker: 3, blinkMs: 400 } as const;
+export const RADAR = { margin: 4, radius: 20, tilesPerPixel: 3, blinkMs: 400 } as const;
+
+/** HUD boxes at the top right: the corner name (`corner`, at every crossing) above the zone name card. */
+export const HUD_BOX = { margin: 4, pad: 3, gap: 2 } as const;
 
 /** Edge arrow toward an off-screen order target: kept `inset` px inside the screen edge. */
 export const TARGET_ARROW = { size: 11, inset: 4 } as const;

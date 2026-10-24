@@ -1,6 +1,7 @@
 {
   "app.lang": "en",
   "app.title": "Jackson Heights RPG",
+  "app.load-failed": "Couldn't load the map. Reload the page to try again.",
 
   "npc.neighbor-a.name": "Neighbor A",
   "npc.neighbor-b.name": "Neighbor B",
@@ -48,6 +49,18 @@
   "street.britton": "Britton Ave",
   "street.case": "Case St",
   "place.corner": "{street} & {cross}",
+  "edge.end": "End of delivery zone",
+
+  "shop.bakery": "Bakery",
+  "shop.grocery": "Grocery",
+  "shop.pharmacy": "Pharmacy",
+  "shop.laundry": "Laundry",
+  "shop.deli": "Deli",
+  "shop.florist": "Florist",
+  "shop.hardware": "Hardware",
+  "shop.salon": "Salon",
+  "shop.cafe": "Cafe",
+  "shop.electronics": "Electronics",
 
   "dialogue.neighbor-a.hello.1": "Hi there! I'm {name}.",
   "dialogue.neighbor-a.hello.2": "I'm only a placeholder for now. Real neighbors move in later.",

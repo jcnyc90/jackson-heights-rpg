@@ -2,6 +2,6 @@
   "start": { "map": "jackson-heights", "spawn": "start" },
   "maps": [
     { "id": "test-map", "file": "test-map.json", "name": "map.test-map.name" },
-    { "id": "jackson-heights", "file": "jackson-heights.json", "name": "map.jackson-heights.name" }
+    { "id": "jackson-heights", "url": "assets/maps/jackson-heights.json", "name": "map.jackson-heights.name" }
   ]
 }

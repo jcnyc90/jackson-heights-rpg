@@ -23,6 +23,11 @@ export interface NpcSpawn {
 
 export const NPC_LAYER = 'npcs';
 
+/** The part of a parsed Tiled JSON map this module reads. */
+interface TiledJson {
+  layers?: { name: string; type: string; objects?: Phaser.Types.Tilemaps.TiledObject[] }[];
+}
+
 /**
  * Reads NPCs from the Tiled object layer "npcs": one point per NPC, at its feet, with
  * string properties npcId, facing (down/left/right/up) and dialogueId, and an optional
@@ -30,11 +35,12 @@ export const NPC_LAYER = 'npcs';
  * (one of NPC_ROLES). Throws on anything malformed so
  * a map mistake fails loudly at load rather than as a silent missing NPC.
  */
-export function readNpcSpawns(map: Phaser.Tilemaps.Tilemap): NpcSpawn[] {
-  const layer = map.getObjectLayer(NPC_LAYER);
-  if (!layer) return [];
+export function readNpcSpawns(source: Phaser.Tilemaps.Tilemap | TiledJson): NpcSpawn[] {
+  // A Phaser tilemap (bundled maps), or the parsed Tiled JSON (the external world map).
+  const objects = 'getObjectLayer' in source ? source.getObjectLayer(NPC_LAYER)?.objects : source.layers?.find((l) => l.name === NPC_LAYER && l.type === 'objectgroup')?.objects;
+  if (!objects) return [];
   const seen = new Set<string>();
-  return layer.objects.map((obj) => {
+  return objects.map((obj) => {
     const where = `NPC object ${obj.id} in layer "${NPC_LAYER}"`;
     const props = new Map<string, unknown>(
       ((obj.properties ?? []) as { name: string; value: unknown }[]).map((p) => [p.name, p.value]),
