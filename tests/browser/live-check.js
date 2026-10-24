@@ -132,7 +132,8 @@ if (!window.__liveShim) {
     const unTap = (code) => faceTap(OPP[code]);
 
     // Glyph checks against the shipped font atlas (FONT_CHARS order: ASCII 32-126, then 160-255).
-    for (let i = 0; i < 100; i++) { pump(5); await new Promise((r) => setTimeout(r, 30)); const px = snap(); if (rgbAt(px, 128, 100) !== 0x1b1528 && rgbAt(px, 128, 100) !== 0) break; }
+    // Wait for the game: since 6e it starts only after the world map has downloaded, so allow up to ~30 s.
+    for (let i = 0; i < 1000; i++) { pump(5); await new Promise((r) => setTimeout(r, 30)); if (!canvas()) continue; const px = snap(); if (rgbAt(px, 128, 100) !== 0x1b1528 && rgbAt(px, 128, 100) !== 0) break; }
     pump(30); pump(24); // the zone name card shows after 300 ms in the zone
     R.bundle = document.querySelector('script[src*="index-"]')?.getAttribute('src');
     const atlas = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = 'assets/fonts/spleen-6x12.png'; });
