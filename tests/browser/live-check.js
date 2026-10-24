@@ -133,7 +133,8 @@ if (!window.__liveShim) {
 
     // Glyph checks against the shipped font atlas (FONT_CHARS order: ASCII 32-126, then 160-255).
     // Wait for the game: since 6e it starts only after the world map has downloaded, so allow up to ~30 s.
-    for (let i = 0; i < 1000; i++) { pump(5); await new Promise((r) => setTimeout(r, 30)); if (!canvas()) continue; const px = snap(); if (rgbAt(px, 128, 100) !== 0x1b1528 && rgbAt(px, 128, 100) !== 0) break; }
+    // Read the canvas right after pumping, in the same task: after an await the WebGL buffer is already cleared.
+    for (let i = 0; i < 1000; i++) { pump(5); if (canvas()) { const px = snap(); if (rgbAt(px, 128, 100) !== 0x1b1528 && rgbAt(px, 128, 100) !== 0) break; } await new Promise((r) => setTimeout(r, 30)); }
     pump(30); pump(24); // the zone name card shows after 300 ms in the zone
     R.bundle = document.querySelector('script[src*="index-"]')?.getAttribute('src');
     const atlas = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = 'assets/fonts/spleen-6x12.png'; });
@@ -161,7 +162,9 @@ if (!window.__liveShim) {
     // Places (6d): a delivery point names its nearest intersection, "<street> & <cross>".
     const placeOf = (stop) => { const p = objs(stop.map, 'deliveryPoint').find((o) => prop(o, 'pointId') === stop.pointId); return fill('place.corner', { street: EN[prop(p, 'street')], cross: EN[prop(p, 'cross')] }); };
     const o1 = ORDERS[0]; const item = EN[o1.text.item]; const params = { item, pickup: placeOf(o1.pickup), dropoff: placeOf(o1.dropoff) };
-    // The start zone's name card, once the player has stood there 300 ms (pumped above).
+    // The start zone's name card, once the player has stood there 300 ms (pumped above). One more frame
+    // first: the awaits above let the browser clear the canvas.
+    pump(1);
     R.startZoneCard = nameCard(EN['zone.roosevelt-ave.name']);
     // The radar (6e): a 43 px circle at the top left: white roads and ring, dark blocks; its corners show the map behind.
     { const px = snap(); let light = 0, dark = 0; for (let y = 4; y < 47; y++) for (let x = 4; x < 47; x++) { const c = rgbAt(px, x, y); if (c === 0xfffaf0) light++; if (c === 0x2a1f3d) dark++; } R.radarDrawn = light > 150 && dark > 150; }
