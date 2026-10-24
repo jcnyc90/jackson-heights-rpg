@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { validateWorld, MAX_MAP_SIDE } from '../../scripts/validate-world.mjs';
+import { readdirSync } from 'node:fs';
+import { validateWorld, privacyProblems, LAND_USES, MAX_MAP_SIDE } from '../../scripts/validate-world.mjs';
 
 const real = JSON.parse(readFileSync(new URL('../../src/data/world/jackson-heights.json', import.meta.url), 'utf8'));
 const copy = () => structuredClone(real);
@@ -32,7 +33,7 @@ test('the shipped dataset covers all four locked zones plus the northern area, a
 
 test('rejects a non-object and a wrong schemaVersion', () => {
   assert.deepEqual(validateWorld(null).errors, ['dataset must be a JSON object']);
-  expectError((d) => (d.schemaVersion = 3), /schemaVersion must be 4/);
+  expectError((d) => (d.schemaVersion = 4), /schemaVersion must be 5/);
 });
 
 test('rejects duplicate and malformed ids', () => {
@@ -170,4 +171,48 @@ test('session 6d: the bounds reach two avenues north of Northern Blvd (32nd and 
   assert.ok(!byId(real.nodes, 'n-76-31ave').continues);
   assert.deepEqual(byId(real.nodes, 'n-elbertson-roosevelt').continues.map((c) => c.dir), ['SE']);
   assert.deepEqual(byId(real.nodes, 'n-britton-roosevelt').continues.map((c) => c.dir), ['SW']);
+});
+
+test('session 6e: every block face has a land-use class (both sides of every segment), from PLUTO or a neighbour', () => {
+  const faces = new Map(real.blockFaces.map((f) => [`${f.segment}/${f.side}`, f]));
+  const ns = new Set(real.streets.filter((s) => s.orientation === 'ns').map((s) => s.id));
+  for (const s of real.segments) for (const side of ns.has(s.street) ? ['east', 'west'] : ['north', 'south']) assert.ok(LAND_USES.includes(faces.get(`${s.id}/${side}`)?.landUse), `${s.id} ${side}`);
+  assert.equal(real.blockFaces.length, 2 * real.segments.length);
+  // Most faces come straight from PLUTO; Travers Park's faces from the Parks outline.
+  assert.ok(real.blockFaces.filter((f) => f.basis === 'pluto').length >= 0.75 * real.blockFaces.length);
+  for (const id of ['bf-34ave-77-78-north', 'bf-77-34ave-northern-east']) assert.equal(real.blockFaces.find((f) => f.id === id).landUse, 'park', id);
+  expectError((d) => d.blockFaces.pop(), /no block face \(land use\)/);
+  expectError((d) => (d.blockFaces[0].landUse = 'mansion'), /landUse must be one of/);
+});
+
+test('session 6e: parks, trees (thinned tile positions), bike lanes and deviations are well-formed and cited', () => {
+  assert.ok(real.parks.some((p) => p.parksId === 'Q303' && p.name === 'Travers Park'));
+  assert.ok(real.trees.tiles.length > 100);
+  assert.equal(real.bikeLanes.length, real.segments.filter((s) => s.street === 'ave-34').length);
+  assert.deepEqual(real.deviations.map((d) => d.id).sort(), ['dev-paseo-bike-lanes', 'dev-paseo-grass']);
+  expectError((d) => d.trees.tiles.push([...d.trees.tiles[0]]), /closer than \d+ tiles/);
+  expectError((d) => (d.parks[0].outline = [[[0, 0]]]), /outline must be rings/);
+  expectError((d) => (d.deviations[0].subject = 'nowhere'), /subject must be an area or a segment/);
+});
+
+test('session 6e privacy: no BBL, address, owner or lot fields anywhere in committed data', () => {
+  // The rules themselves.
+  assert.deepEqual(privacyProblems({ a: [{ name: 'x' }] }), []);
+  assert.equal(privacyProblems({ bbl: 1 }).length, 1);
+  assert.equal(privacyProblems({ ownername: 'x' }).length, 1);
+  assert.equal(privacyProblems({ note: 'lot 4012340056' }).length, 1);
+  assert.equal(privacyProblems({ note: 'at 12-34 56 Street' }).length, 1);
+  assert.equal(privacyProblems({ address: '' }).length, 1);
+  // Every committed JSON under src/data (the dataset, the maps, strings, orders).
+  const root = new URL('../../src/data/', import.meta.url);
+  const files = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(new URL(`${e.name}/`, dir));
+      else if (e.name.endsWith('.json') && !e.name.startsWith('.')) files.push(new URL(e.name, dir));
+    }
+  };
+  walk(root);
+  assert.ok(files.length >= 5);
+  for (const f of files) assert.deepEqual(privacyProblems(JSON.parse(readFileSync(f, 'utf8'))), [], f.pathname);
 });

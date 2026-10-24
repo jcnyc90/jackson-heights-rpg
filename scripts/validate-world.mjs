@@ -19,6 +19,8 @@ const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 const MAP_STATUS = ['proposed', 'built'];
 const ANCHOR_USES = ['pickup', 'dropoff', 'dispatcher'];
 const SIDES = { ns: ['east', 'west'], ew: ['north', 'south'], diagonal: ['north', 'south'] };
+// What a block face shows (schema 5, session 6e; owner's decision 11), from PLUTO land use.
+export const LAND_USES = ['commercial', 'walkup', 'garden-coop', 'house', 'park', 'parking', 'civic'];
 // Longest side of the map, in 16x16 tiles (DESIGN.md 2.14; 64 per map in 6c's split, 256 for 6d's one map).
 export const MAX_MAP_SIDE = 256;
 
@@ -33,7 +35,7 @@ export function validateWorld(data) {
   const err = (m) => errors.push(m);
 
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return { errors: ['dataset must be a JSON object'], warnings, unverified };
-  if (data.schemaVersion !== 4) err(`schemaVersion must be 4 (got ${JSON.stringify(data.schemaVersion)})`);
+  if (data.schemaVersion !== 5) err(`schemaVersion must be 5 (got ${JSON.stringify(data.schemaVersion)})`);
   if (typeof data.id !== 'string' || !ID.test(data.id)) err('id must be a kebab-case string');
 
   // Each collection: an array of objects with unique kebab-case ids. Returns id -> entry.
@@ -258,9 +260,95 @@ export function validateWorld(data) {
   const delivers = (a) => a.uses?.some((u) => u === 'pickup' || u === 'dropoff');
   for (const z of zones.values()) if (![...anchors.values()].some((a) => a.zone === z.id && delivers(a))) warnings.push(`zone "${z.id}" has no pickup or dropoff anchor`);
   for (const lid of landmarks.keys()) if (!usedLandmarks.has(lid)) warnings.push(`landmark "${lid}" is at no anchor`);
+
+  // ---- schema 5 (session 6e): land use per block face, parks, street trees, bike lanes, deviations ----
+  const cite = (where, list) => {
+    if (!Array.isArray(list) || list.length === 0) return err(`${where}: needs at least one source`);
+    for (const sid of list) {
+      if (!sources.has(sid)) err(`${where}: unknown source "${sid}"`);
+      cited.add(sid);
+    }
+  };
+  // Every segment has a face on each side, with one land-use class (PLUTO, or inferred from a neighbour).
+  const faces = collect('blockFaces');
+  const faceOf = new Set();
+  for (const f of faces.values()) {
+    const s = segments.get(f.segment);
+    if (!s) err(`block face "${f.id}": unknown segment "${f.segment}"`);
+    const orientation = streets.get(s?.street)?.orientation;
+    if (orientation && !SIDES[orientation].includes(f.side)) err(`block face "${f.id}": side must be one of ${SIDES[orientation].join(', ')} on this street`);
+    if (!LAND_USES.includes(f.landUse)) err(`block face "${f.id}": landUse must be one of ${LAND_USES.join(', ')}`);
+    if (typeof f.basis !== 'string' || !/^(pluto|parks-outline|nearest:bf-[a-z0-9-]+)$/.test(f.basis)) err(`block face "${f.id}": basis must be "pluto", "parks-outline" or "nearest:<face id>"`);
+    if (faceOf.has(`${f.segment}/${f.side}`)) err(`block face "${f.id}": a second face for ${f.segment} ${f.side}`);
+    faceOf.add(`${f.segment}/${f.side}`);
+  }
+  for (const s of segments.values()) {
+    const sides = SIDES[streets.get(s.street)?.orientation] ?? [];
+    for (const side of sides) if (!faceOf.has(`${s.id}/${side}`)) err(`segment "${s.id}": no block face (land use) on its ${side} side`);
+  }
+  if (faces.size > 0) cited.add('dcp-pluto');
+  const point = (p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite);
+  for (const pk of collect('parks').values()) {
+    if (typeof pk.name !== 'string' || pk.name === '') err(`park "${pk.id}": needs a name`);
+    if (!Array.isArray(pk.outline) || pk.outline.length === 0 || !pk.outline.every((r) => Array.isArray(r) && r.length >= 3 && r.every(point))) err(`park "${pk.id}": outline must be rings of at least 3 [x, y] grid points`);
+    cite(`park "${pk.id}"`, pk.sources);
+  }
+  const tr = data.trees;
+  if (tr === null || typeof tr !== 'object' || Array.isArray(tr)) err('trees: must be an object');
+  else {
+    cite('trees', tr.sources);
+    if (!Number.isInteger(tr.gapTiles) || tr.gapTiles < 1) err('trees.gapTiles: must be a positive integer');
+    if (!Array.isArray(tr.tiles) || !tr.tiles.every((t) => Array.isArray(t) && t.length === 2 && t.every(Number.isInteger))) err('trees.tiles: must list [column, row] integer tile positions');
+    else {
+      const seen = new Set();
+      for (const [x, y] of tr.tiles) {
+        for (let dx = 1 - tr.gapTiles; dx < tr.gapTiles; dx++) for (let dy = 1 - tr.gapTiles; dy < tr.gapTiles; dy++) if (seen.has(`${x + dx},${y + dy}`)) err(`trees: [${x}, ${y}] is closer than ${tr.gapTiles} tiles to another tree`);
+        seen.add(`${x},${y}`);
+      }
+    }
+  }
+  const bikes = Array.isArray(data.bikeLanes) ? data.bikeLanes : (err('bikeLanes: must be an array'), []);
+  for (const bl of bikes) {
+    const s = segments.get(bl?.segment);
+    if (!s) err(`bikeLanes: unknown segment "${bl?.segment}"`);
+    if (typeof bl?.deviation !== 'boolean' || typeof bl?.drawn !== 'string') err(`bikeLanes "${bl?.segment}": needs drawn (string) and deviation (boolean)`);
+  }
+  if (bikes.length > 0) cited.add('dot-bike-routes');
+  for (const dv of collect('deviations').values()) {
+    if (!areas.has(dv.subject) && !segments.has(dv.subject)) err(`deviation "${dv.id}": subject must be an area or a segment`);
+    for (const k of ['game', 'reality']) if (typeof dv[k] !== 'string' || dv[k] === '') err(`deviation "${dv.id}": needs ${k}`);
+  }
+  for (const p of privacyProblems(data)) err(p);
   for (const sid of sources.keys()) if (!cited.has(sid) && sources.get(sid).role !== 'licence') warnings.push(`source "${sid}" is cited by no fact`);
 
   return { errors, warnings, unverified };
+}
+
+/**
+ * Privacy rules for committed data (session 6e): no tax-lot or person fields (BBL, address, owner,
+ * lot geometry), no BBL-like 10-digit numbers and no house numbers ("12-34 56 St"). Walks every key
+ * and value of any parsed JSON. Returns one message per hit (empty when clean).
+ */
+export function privacyProblems(value) {
+  const KEYS = /^(bbl|bin|address|addr|housenum|house_?number|owner|ownername|lot|lotgeom|lotgeometry|block|borocode|zipcode|zip|footprint|latitude|longitude|lat|lon|lng)$/i;
+  const BBL = /\b[1-5]\d{9}\b/;
+  const HOUSE = /\b\d{1,3}-\d{2}[A-Z]?\s+\d{1,3}(st|nd|rd|th)?\s+(st|street|ave|avenue|av|rd|road|pl|place|blvd)\b/i;
+  const hits = [];
+  const walk = (v, path) => {
+    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${path}[${i}]`));
+    if (v !== null && typeof v === 'object') {
+      for (const [k, x] of Object.entries(v)) {
+        if (KEYS.test(k)) hits.push(`privacy: field "${k}" at ${path}`);
+        walk(x, `${path}.${k}`);
+      }
+      return;
+    }
+    const s = String(v);
+    if (BBL.test(s)) hits.push(`privacy: BBL-like number at ${path}`);
+    if (HOUSE.test(s)) hits.push(`privacy: house number at ${path}`);
+  };
+  walk(value, '$');
+  return hits;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -277,7 +365,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const stations = Array.isArray(data.transit) ? data.transit.filter((t) => t.kind === 'station').length : 0;
   const zoned = new Set((Array.isArray(data.zones) ? data.zones : []).flatMap((z) => z.segments ?? []));
   const continuing = Array.isArray(data.nodes) ? data.nodes.reduce((n, x) => n + (x.continues?.length ?? 0), 0) : 0;
-  console.log(`[world] ${file}: ${count('zones')} zones, ${count('maps')} map, ${count('streets')} streets, ${count('nodes')} nodes, ${count('segments')} segments (${zoned.size} in zones), ${continuing} street ends running past the bounds, ${stations} stations, ${count('areas')} areas, ${count('anchors')} anchors, ${count('landmarks')} landmarks, ${count('sources')} sources`);
+  console.log(`[world] ${file}: ${count('zones')} zones, ${count('maps')} map, ${count('streets')} streets, ${count('nodes')} nodes, ${count('segments')} segments (${zoned.size} in zones), ${continuing} street ends running past the bounds, ${stations} stations, ${count('areas')} areas, ${count('anchors')} anchors, ${count('landmarks')} landmarks, ${count('blockFaces')} block faces, ${count('parks')} parks, ${data.trees?.tiles?.length ?? 0} trees, ${count('bikeLanes')} bike-lane blocks, ${count('sources')} sources`);
   for (const w of warnings) console.log(`[world] warning: ${w}`);
   console.log(`[world] facts not both verified and high confidence: ${unverified.length}`);
   for (const u of unverified) console.log(`[world]   ${u}`);
