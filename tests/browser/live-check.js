@@ -5,16 +5,17 @@
 //        then returns 'reloaded'. (A hidden browser pane pauses real rAF; the shim lets the
 //        check pump frames itself, at exactly 60 fps, so the walk below is deterministic.)
 //   2nd: drives the game with real KeyboardEvents and checks pixels on the canvas.
-// Session 6c: every route is derived from map data. The script fetches the map registry, the maps,
-// the orders and the strings (default: this repo's main branch on raw.githubusercontent.com; set
-// window.__dataBase, e.g. to 'http://localhost:5173/src/data/' with the dev server running, to check a
-// local preview), finds paths over the map's collision grid (BFS), and walks them by dead reckoning:
-// the player moves exactly 2 px per frame held (session 6d), so a tile is 8 frames, and spawns sit on
-// tile centres. Routes are 4-way here (straight moves keep dead reckoning exact; diagonals move 1 or 2 px
-// per axis per step, which regression T2 covers). Since 6d the world is one map with no warps: it walks
+// Session 6c: every route is derived from map data. The script fetches the map registry, the orders and
+// the strings (default: this repo's main branch on raw.githubusercontent.com; set window.__dataBase, e.g.
+// to 'http://localhost:5173/src/data/' with the dev server running, to check a local preview), and since
+// 6e the world map itself from the page's own site (the deployed external asset, its zlib layers inflated
+// here). It finds paths over the map's collision grid (BFS) and walks them by dead reckoning: from rest,
+// holding a key n frames moves exactly floor(2.5 n) px (150 px/s, session 6e), so each straight run is
+// split into holds of exact lengths; spawns sit on tile centres. Routes are 4-way here (diagonals move 1
+// or 2 px per axis per step, which regression T2 covers). The world is one map with no warps: it walks
 // from a new game's start to the Dispatcher and completes Order #1, and reports the walking time. It reads
 // the start zone's name card, every text-window line and order ticket off the canvas, glyph by glyph
-// against the shipped font atlas, and checks the minimap is drawn, the Spleen notices and page errors.
+// against the shipped font atlas, and checks the radar is drawn, the Spleen notices and page errors.
 // Top-level await: evaluate as an async function body. Returns a results object.
 if (!window.__liveShim) {
   const html = await (await fetch(location.href, { cache: 'no-store' })).text();
@@ -42,7 +43,14 @@ if (!window.__liveShim) {
     const BASE = window.__dataBase ?? 'https://raw.githubusercontent.com/jcnyc90/jackson-heights-rpg/main/src/data/';
     const getJson = async (path) => { const r = await fetch(BASE + path, { cache: 'no-store' }); if (!r.ok) throw new Error(`fetch ${BASE + path}: ${r.status}`); return r.json(); };
     const REG = await getJson('maps/index.json'); const EN = await getJson('strings/en.json'); const ORDERS = (await getJson('orders.json')).orders;
-    const MAPS = {}; for (const m of REG.maps) MAPS[m.id] = await getJson(`maps/${m.file}`);
+    // Bundled maps from the data base; external ones (the world map, 6e) from this site, as deployed.
+    const inflate = async (b64) => { const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)); return new Uint32Array(await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer()); };
+    const MAPS = {};
+    for (const m of REG.maps) {
+      if (!m.url) { MAPS[m.id] = await getJson(`maps/${m.file}`); continue; }
+      const r = await fetch(m.url, { cache: 'no-store' }); if (!r.ok) throw new Error(`fetch ${m.url}: ${r.status}`);
+      const d = await r.json(); MAPS[m.id] = d; d.__solid = await inflate(d.layers.find((l) => l.name === 'collision').data);
+    }
     R.dataBase = BASE;
     const prop = (o, n) => o.properties?.find((p) => p.name === n)?.value;
     const objs = (id, type) => MAPS[id].layers.find((l) => l.name === 'objects').objects.filter((o) => o.type === type);
@@ -50,13 +58,15 @@ if (!window.__liveShim) {
     const spawnOf = (id, sid) => objs(id, 'spawn').find((o) => prop(o, 'spawnId') === sid);
     const nameOf = (id) => EN[REG.maps.find((m) => m.id === id).name];
     const grid = (id) => {
-      const d = MAPS[id]; const ts = d.tilesets.find((t) => t.name === 'tiles');
-      const solid = new Set((ts.tiles ?? []).filter((t) => t.properties?.some((p) => p.name === 'collides' && p.value === true)).map((t) => t.id + ts.firstgid));
-      const obs = d.layers.find((l) => l.name === 'obstacles').data;
+      const d = MAPS[id];
+      // The world map: its collision layer; bundled maps: colliding tiles of "obstacles".
+      let blocked;
+      if (d.__solid) blocked = (tx, ty) => d.__solid[ty * d.width + tx] !== 0;
+      else { const ts = d.tilesets.find((t) => t.name === 'tiles'); const solid = new Set((ts.tiles ?? []).filter((t) => t.properties?.some((p) => p.name === 'collides' && p.value === true)).map((t) => t.id + ts.firstgid)); const obs = d.layers.find((l) => l.name === 'obstacles').data; blocked = (tx, ty) => solid.has(obs[ty * d.width + tx]); }
       const npcs = new Set((d.layers.find((l) => l.name === 'npcs')?.objects ?? []).map((o) => `${Math.floor(o.x / 16)},${Math.floor((o.y - 1) / 16)}`));
       const inside = (r, tx, ty) => tx * 16 + 8 >= r.x && tx * 16 + 8 < r.x + r.width && ty * 16 + 8 >= r.y && ty * 16 + 8 < r.y + r.height;
       const wk = walkOf(id); const inWalk = (tx, ty) => !wk || (tx >= wk[0] && ty >= wk[1] && tx < wk[0] + wk[2] && ty < wk[1] + wk[3]);
-      return { id, W: d.width, H: d.height, inside, warpAt: (tx, ty) => warpsOf(id).find((w) => inside(w, tx, ty)), open: (tx, ty) => tx >= 0 && ty >= 0 && tx < d.width && ty < d.height && inWalk(tx, ty) && !solid.has(obs[ty * d.width + tx]) && !npcs.has(`${tx},${ty}`) };
+      return { id, W: d.width, H: d.height, inside, warpAt: (tx, ty) => warpsOf(id).find((w) => inside(w, tx, ty)), open: (tx, ty) => tx >= 0 && ty >= 0 && tx < d.width && ty < d.height && inWalk(tx, ty) && !blocked(tx, ty) && !npcs.has(`${tx},${ty}`) };
     };
     const STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]]; const KEY = { '1,0': 'ArrowRight', '-1,0': 'ArrowLeft', '0,1': 'ArrowDown', '0,-1': 'ArrowUp' };
     const bfs = (G, start, isGoal) => {
@@ -82,6 +92,15 @@ if (!window.__liveShim) {
     const walkOf = (id) => { const p = Object.fromEntries((MAPS[id].properties ?? []).map((q) => [q.name, q.value])); return p.walkX === undefined ? null : [p.walkX, p.walkY, p.walkWidth, p.walkHeight]; };
     const hold = (code, n, watchFade = false) => { ev('keydown', code); for (let i = 0; i < n; i++) { pump(1); if (watchFade) { const c = rgbAt(snap(), 128, 112); darkest = Math.min(darkest, (c >> 16) + ((c >> 8) & 255) + (c & 255)); } } ev('keyup', code); pump(1); };
     const DELTA = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] };
+    // Moves exactly d px in a straight line (6e): a hold of n frames from rest moves floor(2.5 n) px, which is
+    // 0 or 2 mod 5; the rest is made up with 1-frame taps of 2 px. Returns the frames held.
+    const PX = (n) => Math.floor((5 * n) / 2);
+    const holdFor = (px) => { for (let n = 1; PX(n) <= px; n++) if (PX(n) === px) return n; return 0; };
+    const moveExact = (code, d) => {
+      let taps = 0; while (taps < 5 && !holdFor(d - 2 * taps)) taps++;
+      const n = holdFor(d - 2 * taps); if (n) hold(code, n); for (let t = 0; t < taps; t++) hold(code, 1);
+      return n + taps;
+    };
     // Walks a tile path; a warp tile at the end is stepped onto and the fade waited out, landing on its target spawn.
     const walkPath = (path) => {
       const arrivals = [];
@@ -90,11 +109,11 @@ if (!window.__liveShim) {
         while (j < path.length - 1 && path[j + 1][0] - path[j][0] === d[0] && path[j + 1][1] - path[j][1] === d[1]) j++;
         const code = KEY[d.join(',')]; const w = grid(P.map).warpAt(...path[j]);
         if (w) {
-          if (j - i > 1) { hold(code, (j - i - 1) * 8); P.x += d[0] * 16 * (j - i - 1); P.y += d[1] * 16 * (j - i - 1); }
-          hold(code, 8 + 45, true);
+          if (j - i > 1) { moveExact(code, 16 * (j - i - 1)); P.x += d[0] * 16 * (j - i - 1); P.y += d[1] * 16 * (j - i - 1); }
+          hold(code, 7 + 45, true);
           const to = prop(w, 'targetMap'); const sp = spawnOf(to, prop(w, 'targetSpawn')); Object.assign(P, { map: to, x: sp.x, y: sp.y });
           arrivals.push({ map: to, warp: w.name, nameCard: nameCard(nameOf(to)) }); pump(2);
-        } else { hold(code, (j - i) * 8); walkFrames += (j - i) * 8 + 1; P.x += d[0] * 16 * (j - i); P.y += d[1] * 16 * (j - i); }
+        } else { walkFrames += moveExact(code, 16 * (j - i)); P.x += d[0] * 16 * (j - i); P.y += d[1] * 16 * (j - i); }
         i = j;
       }
       return arrivals;
@@ -121,7 +140,8 @@ if (!window.__liveShim) {
     const apx = actx.getImageData(0, 0, atlas.width, atlas.height).data;
     const lit = (ch, x, y) => { const c = ch.charCodeAt(0); const i = c <= 126 ? c - 32 : 95 + c - 160; const p = (((Math.floor(i / 16) * 12) + y) * atlas.width + (i % 16) * 6 + x) * 4; return apx[p + 3] > 0; };
     const badGlyphs = (lines, x0, y0) => { const px = snap(); const bad = []; lines.forEach((line, row) => [...line].forEach((ch, col) => { for (let y = 0; y < 12; y++) for (let x = 0; x < 6; x++) if (rgbAt(px, x0 + col * 6 + x, y0 + row * 12 + y) !== (lit(ch, x, y) ? 0xfffaf0 : 0x2a1f3d)) { bad.push(ch); return; } })); return bad; };
-    function nameCard(name) { return badGlyphs([name], 7, 7); }
+    // Name cards sit at the top right (6e), under the corner-name row on the world map: 4 px margin, 3 px padding.
+    function nameCard(name) { const w = [...name].length * 6 + 6; return badGlyphs([name], 256 - 4 - w + 3, 4 + 18 + 2 + 3); }
     // Text window: 36 columns, words never split (src/systems/textLayout.ts); at the bottom when the player is in the top half.
     const wrap = (text) => { const out = []; let line = ''; for (const w of text.split(' ')) { if (line && (line + ' ' + w).length > 36) { out.push(line); line = w; } else line = line ? line + ' ' + w : w; } out.push(line); return out; };
     const winText = (text) => { const atBottom = P.y - scroll()[1] < 112; return badGlyphs(wrap(text), 8 + 10, (atBottom ? 224 - 8 - 56 : 8) + 8); };
@@ -142,7 +162,8 @@ if (!window.__liveShim) {
     const o1 = ORDERS[0]; const item = EN[o1.text.item]; const params = { item, pickup: placeOf(o1.pickup), dropoff: placeOf(o1.dropoff) };
     // The start zone's name card, once the player has stood there 300 ms (pumped above).
     R.startZoneCard = nameCard(EN['zone.roosevelt-ave.name']);
-    { const px = snap(); let light = 0, dark = 0; for (let y = 6; y < 55; y++) for (let x = 197; x < 251; x++) { const c = rgbAt(px, x, y); if (c === 0xd9d9df) light++; if (c === 0x2a1f3d) dark++; } R.minimapDrawn = light > 200 && dark > 500; }
+    // The radar (6e): a 43 px circle at the top left: white roads and ring, dark blocks; its corners show the map behind.
+    { const px = snap(); let light = 0, dark = 0; for (let y = 4; y < 47; y++) for (let x = 4; x < 47; x++) { const c = rgbAt(px, x, y); if (c === 0xfffaf0) light++; if (c === 0x2a1f3d) dark++; } R.radarDrawn = light > 150 && dark > 150; }
     const dispNpc = MAPS[REG.start.map].layers.find((l) => l.name === 'npcs').objects.find((o) => prop(o, 'role') === 'dispatcher');
     const toDisp = travel(REG.start.map, [Math.floor(dispNpc.x / 16), Math.floor((dispNpc.y - 1) / 16)]);
     R.startToDispatcherTiles = `${startSpawn.x},${startSpawn.y} -> ${P.x},${P.y}`;
@@ -177,6 +198,6 @@ if (!window.__liveShim) {
   R.errors = window.__errors;
   R.framesPumped = frames;
   const glyphChecks = Object.keys(R).filter((k) => /^order_(?!ticketHidden)|^startZoneCard$/.test(k));
-  R.summary = glyphChecks.every((k) => Array.isArray(R[k]) && R[k].length === 0) && R.order_ticketHiddenAfterDelivery && R.minimapDrawn && R.leg1_warps === 0 && R.leg2_warps === 0 && R.noticesHaveSpleen && R.bannerMentionsSpleen && R.errors.length === 0 && !R.ERROR ? 'PASS' : 'FAIL';
+  R.summary = glyphChecks.every((k) => Array.isArray(R[k]) && R[k].length === 0) && R.order_ticketHiddenAfterDelivery && R.radarDrawn && R.leg1_warps === 0 && R.leg2_warps === 0 && R.noticesHaveSpleen && R.bannerMentionsSpleen && R.errors.length === 0 && !R.ERROR ? 'PASS' : 'FAIL';
   R;
 }

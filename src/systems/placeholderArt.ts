@@ -5,10 +5,10 @@ import { DIRECTIONS, NPC_FRAME, PLAYER_FRAME, TEXT_WINDOW, TEXTURES, TILE_SIZE, 
 // Placeholder art drawn with Canvas 2D at boot. Throwaway by design: real art replaces
 // it by loading files under the same texture keys (see generatePlaceholderTextures).
 
-type Ctx = CanvasRenderingContext2D;
+export type Ctx = CanvasRenderingContext2D;
 
 // EarthBound-ish pastels with a chunky dark outline colour.
-const C = {
+export const C = {
   outline: '#2a1f3d',
   grass: '#a6e3a1',
   grassDark: '#7fc98a',
@@ -58,15 +58,20 @@ const C = {
   pants: '#6a76b8',
   bag: '#ffd46e',
   slate: '#9a98c2',
+  slateDark: '#86849f',
+  // Session 6e: civic stone (also the HUD's light grey and el grey).
+  stone: '#d9d9df',
+  stoneShade: '#9f9fb4',
+  signPlate: '#2f6b4f',
 } as const;
 
-function rect(ctx: Ctx, color: string, x: number, y: number, w = 1, h = 1): void {
+export function rect(ctx: Ctx, color: string, x: number, y: number, w = 1, h = 1): void {
   ctx.fillStyle = color;
   ctx.fillRect(x, y, w, h);
 }
 
 /** One string per row, one char per pixel; chars missing from the palette are transparent. */
-function pixelMap(ctx: Ctx, ox: number, oy: number, rows: string[], palette: Record<string, string>): void {
+export function pixelMap(ctx: Ctx, ox: number, oy: number, rows: string[], palette: Record<string, string>): void {
   rows.forEach((row, y) => {
     [...row].forEach((ch, x) => {
       const color = palette[ch];
@@ -131,7 +136,7 @@ const TREE = [
 ];
 const TREE_COLORS = { o: C.outline, G: C.leaf, g: C.leafDark, T: C.trunk };
 
-const PLANTER = [
+export const PLANTER = [
   '................',
   '................',
   '................',
@@ -164,7 +169,7 @@ const EMOTE = [
 ];
 
 // A traffic signal on the corner: a dark pole, its head with a red and a green lamp.
-const SIGNAL = [
+export const SIGNAL = [
   '................',
   '......oooo......',
   '.....oRRRRo.....',
@@ -184,7 +189,7 @@ const SIGNAL = [
 ];
 
 // Steel column of the elevated 7, on the shadowed roadway.
-const PILLAR = [
+export const PILLAR = [
   '...oooooooooo...',
   '...oSSssssSSo...',
   '....oSssssSo....',
@@ -365,7 +370,89 @@ const TILE_PAINTERS: Record<string, Painter> = {
     rect(ctx, C.paseoSeam, x + 3, y, 1, 7);
     rect(ctx, C.paseoSeam, x + 11, y + 8, 1, 7);
   },
+  // ---- session 6e: parks, the grassy paseo, lots, yards; collision; prop markers (Tiled view only) ----
+  lawn: (ctx, x, y) => paintLawn(ctx, x, y, C.grass, C.grassDark),
+  'lawn-dark': (ctx, x, y) => paintLawn(ctx, x, y, C.grassDark, C.leafDark),
+  // Owner's decision 9: the paseo is grass (a game deviation: it is asphalt with planters).
+  'paseo-grass': (ctx, x, y) => {
+    paintLawn(ctx, x, y, C.grass, C.grassDark);
+    rect(ctx, C.leaf, x + 7, y + 7, 2, 2);
+  },
+  // Green painted bike lane with a white edge line every other tile and a chevron.
+  'bike-lane': (ctx, x, y) => {
+    rect(ctx, C.leafDark, x, y, 16, 16);
+    rect(ctx, C.station, x + 2, y + 3, 1, 1);
+    rect(ctx, C.white, x + 6, y + 6, 4, 1);
+    rect(ctx, C.white, x + 7, y + 7, 2, 1);
+  },
+  'park-path': (ctx, x, y) => {
+    rect(ctx, C.plaza, x, y, 16, 16);
+    for (const [px, py] of [[3, 3], [11, 6], [6, 12], [13, 13]]) rect(ctx, C.plazaSeam, x + px, y + py);
+  },
+  // Parking lot asphalt, and the same with a white stall line.
+  lot: (ctx, x, y) => {
+    rect(ctx, C.roadDark, x, y, 16, 16);
+    for (const [px, py] of [[4, 5], [11, 12], [13, 3], [1, 14]]) rect(ctx, C.slate, x + px, y + py);
+  },
+  'lot-stall': (ctx, x, y) => {
+    rect(ctx, C.roadDark, x, y, 16, 16);
+    rect(ctx, C.white, x, y, 1, 16);
+  },
+  // A fenced back yard (seen over the fence: dark grass) and a private garden (co-ops).
+  yard: (ctx, x, y) => paintLawn(ctx, x, y, C.grassDark, C.leafDark),
+  garden: (ctx, x, y) => {
+    paintLawn(ctx, x, y, C.leaf, C.leafDark);
+  },
+  flowers: (ctx, x, y) => {
+    paintLawn(ctx, x, y, C.grass, C.grassDark);
+    for (const [px, py, c] of [[3, 3, C.flowerPink], [10, 5, C.flowerYellow], [6, 10, C.flowerYellow], [12, 12, C.flowerPink]] as const) {
+      rect(ctx, c, x + px, y + py, 2, 2);
+      rect(ctx, C.outline, x + px, y + py + 2, 2, 1);
+    }
+  },
+  manhole: (ctx, x, y) => {
+    paintRoad(ctx, x, y);
+    rect(ctx, C.curb, x + 4, y + 5, 8, 6);
+    rect(ctx, C.curb, x + 5, y + 4, 6, 8);
+    for (const py of [6, 8]) rect(ctx, C.roadDark, x + 5, y + py, 6, 1);
+  },
+  // The world map's collision layer (hidden in the game); a hatch so it reads in Tiled.
+  solid: (ctx, x, y) => {
+    for (let i = 0; i < 16; i++) rect(ctx, C.signalRed, x + i, y + i);
+    for (let i = 0; i < 16; i++) rect(ctx, C.signalRed, x + 15 - i, y + i);
+  },
+  'p-tree': marker(C.leafDark),
+  'p-bush': marker(C.grassDark),
+  'p-lamp': marker(C.slate),
+  'p-hydrant': marker(C.signalRed),
+  'p-trash': marker(C.steel),
+  'p-bench': marker(C.trunk),
+  'p-signal': marker(C.signalGreen),
+  'p-barricade': marker(C.awning),
+  'p-pillar': marker(C.steelLight),
+  'p-stairs': marker(C.station),
+  'p-planter': marker(C.planter),
+  playground: (ctx, x, y) => {
+    rect(ctx, C.awning, x, y, 16, 16);
+    for (const [px, py] of [[2, 3], [9, 7], [5, 12], [13, 13]]) rect(ctx, C.brick, x + px, y + py, 2, 2);
+  },
 };
+
+/** A prop marker for the props layer in Tiled: a coloured dot on transparency (the game draws a sprite instead). */
+function marker(color: string): Painter {
+  return (ctx, x, y) => {
+    rect(ctx, C.outline, x + 4, y + 4, 8, 8);
+    rect(ctx, color, x + 5, y + 5, 6, 6);
+  };
+}
+
+function paintLawn(ctx: Ctx, x: number, y: number, base: string, blade: string): void {
+  rect(ctx, base, x, y, 16, 16);
+  for (const [tx, ty] of [[3, 4], [10, 10], [12, 2], [2, 12]]) {
+    rect(ctx, blade, x + tx, y + ty);
+    rect(ctx, blade, x + tx + 1, y + ty - 1);
+  }
+}
 
 const OVERHEAD_PAINTERS: Record<string, Painter> = {
   canopy: (ctx, x, y) => pixelMap(ctx, x, y, TREE.slice(0, TILE_SIZE), TREE_COLORS),

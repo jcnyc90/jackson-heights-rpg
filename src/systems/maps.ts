@@ -1,10 +1,11 @@
 import registry from '../data/maps/index.json';
 import { DIRECTIONS, PLAYER_FEET, type Direction } from '../config';
+import { externalMap, type WorldData } from './mapLoader';
 
 // Map registry (src/data/maps/index.json) plus the spawn points and warps read from each
 // map's Tiled "objects" layer. See DESIGN.md 2.12.
 
-/** Every map JSON next to the registry, bundled with the code. */
+/** Every map JSON next to the registry, bundled with the code (the world map is external: see mapLoader). */
 const FILES = import.meta.glob<object>('../data/maps/*.json', { eager: true, import: 'default' });
 
 export interface Spawn {
@@ -39,13 +40,28 @@ export interface DeliveryPoint {
   height: number;
 }
 
-/** A street-name sign: the two streets of an intersection, drawn with one corner (`align`) at x, y. */
+/**
+ * A sign on a post (layer "labels", session 6e): a corner-post blade sign naming the two streets of a
+ * crossing (class "streetSign"), or an "End of delivery zone" sign at the map edge (class "edgeSign",
+ * string id `text`). x, y = the foot of the post.
+ */
 export interface StreetSign {
-  street: string;
-  cross: string;
-  align: 'nw' | 'ne' | 'sw' | 'se';
+  kind: 'street' | 'edge';
+  street?: string;
+  cross?: string;
+  text?: string;
   x: number;
   y: number;
+}
+
+/** A crossing's box (layer "corners"): while the player stands in it, the HUD names the corner. */
+export interface CornerRect {
+  street: string;
+  cross: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /** A named area of a map (layer "zones"): the zone's name card shows when the player walks in. */
@@ -75,11 +91,14 @@ export interface MapInfo {
   spawns: Spawn[];
   warps: Warp[];
   deliveryPoints: DeliveryPoint[];
-  /** Street signs (layer "labels") and zone areas (layer "zones"); empty on maps without them. */
+  /** Signs (layer "labels"), crossings (layer "corners") and zone areas (layer "zones"); empty on maps without them. */
   signs: StreetSign[];
+  corners: CornerRect[];
   zones: ZoneRect[];
   /** Where the player can walk, in map pixels (map properties walkX/Y/Width/Height, in tiles); the whole map if not set. */
   walk: Rect;
+  /** External maps (the world map): the decoded tile layers and buildings, drawn by WorldView. */
+  world?: WorldData;
 }
 
 export interface Destination {
@@ -162,13 +181,12 @@ export function readObjects(mapId: string, data: TiledMap) {
   return { spawns, warps, deliveryPoints };
 }
 
-const ALIGNS = ['nw', 'ne', 'sw', 'se'] as const;
-
 /**
- * Reads the optional layers of a generated map: street signs ("labels": points of class
- * "streetSign" with string properties street, cross and align) and zone areas ("zones":
- * rectangles of class "zone" with string property zoneId), and the walkable area (int map
- * properties walkX, walkY, walkWidth, walkHeight, in tiles). Malformed entries throw, like objects.
+ * Reads the optional layers of a generated map: signs ("labels": points of class "streetSign" with
+ * string properties street and cross, or "edgeSign" with text), crossings ("corners": rectangles
+ * with street and cross), zone areas ("zones": rectangles of class "zone" with string property
+ * zoneId), and the walkable area (int map properties walkX, walkY, walkWidth, walkHeight, in
+ * tiles). Malformed entries throw, like objects.
  */
 export function readExtras(mapId: string, data: TiledMap) {
   const tw = data.tilewidth ?? 16;
@@ -183,10 +201,17 @@ export function readExtras(mapId: string, data: TiledMap) {
   const signs: StreetSign[] = objectsOf('labels').map((obj) => {
     const where = `Map "${mapId}", sign ${obj.id} ("${obj.name ?? ''}")`;
     const p = props(obj);
-    const align = str(where, p, 'align') as StreetSign['align'];
-    if (obj.type !== 'streetSign' || !obj.point) throw new Error(`${where}: must be a point of class "streetSign"`);
-    if (!ALIGNS.includes(align)) throw new Error(`${where}: align must be one of ${ALIGNS.join('/')}`);
-    return { street: str(where, p, 'street'), cross: str(where, p, 'cross'), align, x: obj.x, y: obj.y };
+    if (!obj.point) throw new Error(`${where}: must be a point`);
+    if (obj.type === 'streetSign') return { kind: 'street', street: str(where, p, 'street'), cross: str(where, p, 'cross'), x: obj.x, y: obj.y };
+    if (obj.type === 'edgeSign') return { kind: 'edge', text: str(where, p, 'text'), x: obj.x, y: obj.y };
+    throw new Error(`${where}: class must be "streetSign" or "edgeSign"`);
+  });
+  const corners: CornerRect[] = objectsOf('corners').map((obj) => {
+    const where = `Map "${mapId}", corner ${obj.id} ("${obj.name ?? ''}")`;
+    const { width = 0, height = 0 } = obj;
+    if (obj.type !== 'corner' || obj.point || width <= 0 || height <= 0) throw new Error(`${where}: must be a rectangle of class "corner"`);
+    const p = props(obj);
+    return { street: str(where, p, 'street'), cross: str(where, p, 'cross'), x: obj.x, y: obj.y, width, height };
   });
   const zones: ZoneRect[] = objectsOf('zones').map((obj) => {
     const where = `Map "${mapId}", zone area ${obj.id} ("${obj.name ?? ''}")`;
@@ -203,15 +228,17 @@ export function readExtras(mapId: string, data: TiledMap) {
     if (![x, y, w, h].every((v) => Number.isInteger(v))) throw new Error(`Map "${mapId}": walkX, walkY, walkWidth and walkHeight must all be int properties`);
     walk = { x: (x as number) * tw, y: (y as number) * th, width: (w as number) * tw, height: (h as number) * th };
   }
-  return { signs, zones, walk };
+  return { signs, corners, zones, walk };
 }
 
 const MAPS = new Map<string, MapInfo>();
-for (const entry of registry.maps) {
-  const data = FILES[`../data/maps/${entry.file}`];
-  if (!data) throw new Error(`Map registry: "${entry.id}" points at missing file "${entry.file}"`);
+for (const entry of registry.maps as { id: string; name: string; file?: string; url?: string }[]) {
+  // Bundled maps have a `file` next to the registry; external ones a `url`, fetched before the game loads.
+  const ext = entry.url ? externalMap(entry.id) : undefined;
+  const data = entry.url ? ext?.data : FILES[`../data/maps/${entry.file}`];
+  if (!data) throw new Error(`Map registry: "${entry.id}" points at missing ${entry.url ? `external map "${entry.url}" (not loaded)` : `file "${entry.file}"`}`);
   if (MAPS.has(entry.id)) throw new Error(`Map registry: duplicate id "${entry.id}"`);
-  MAPS.set(entry.id, { id: entry.id, nameId: entry.name, data, ...readObjects(entry.id, data), ...readExtras(entry.id, data) });
+  MAPS.set(entry.id, { id: entry.id, nameId: entry.name, data, ...readObjects(entry.id, data), ...readExtras(entry.id, data), ...(ext ? { world: ext.world } : {}) });
 }
 
 export const MAP_LIST: readonly MapInfo[] = [...MAPS.values()];

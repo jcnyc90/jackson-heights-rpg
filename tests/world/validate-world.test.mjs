@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { validateWorld, MAX_MAP_SIDE } from '../../scripts/validate-world.mjs';
+import { readdirSync } from 'node:fs';
+import { validateWorld, privacyProblems, LAND_USES, WALK_LIMITS } from '../../scripts/validate-world.mjs';
 
 const real = JSON.parse(readFileSync(new URL('../../src/data/world/jackson-heights.json', import.meta.url), 'utf8'));
 const copy = () => structuredClone(real);
@@ -32,7 +33,7 @@ test('the shipped dataset covers all four locked zones plus the northern area, a
 
 test('rejects a non-object and a wrong schemaVersion', () => {
   assert.deepEqual(validateWorld(null).errors, ['dataset must be a JSON object']);
-  expectError((d) => (d.schemaVersion = 3), /schemaVersion must be 4/);
+  expectError((d) => (d.schemaVersion = 4), /schemaVersion must be 5/);
 });
 
 test('rejects duplicate and malformed ids', () => {
@@ -84,9 +85,11 @@ test('areas need a known kind and known segments', () => {
 test('a segment belongs to at most one zone; "unmapped" is retired', () => {
   expectError((d) => byId(d.zones, 'ave-37').segments.push('seg-roosevelt-74-75'), /segment "seg-roosevelt-74-75" is in two zones/);
   expectError((d) => (byId(d.segments, 'seg-37ave-73-74').unmapped = 'no'), /segment "seg-37ave-73-74": unmapped is retired in schema 4/);
-  // A segment in no zone is fine (drawn, just unnamed): 6c's two unmapped segments are now such segments.
+  // A segment in no zone is fine (drawn, just unnamed): 34th Ave to Northern Blvd at 77th-88th St.
+  // Since 6e the flank blocks south of Northern (73rd-76th, 89th-90th St) join the nearest zone (owner's decision 13).
   const zoned = new Set(real.zones.flatMap((z) => z.segments));
-  assert.ok(!zoned.has('seg-35ave-88-89') && !zoned.has('seg-89-35ave-37ave'));
+  assert.ok(!zoned.has('seg-80-34ave-northern'));
+  for (const sid of ['seg-35ave-88-89', 'seg-89-35ave-37ave', 'seg-73-35ave-37ave', 'seg-34ave-73-74', 'seg-90-34ave-northern']) assert.ok(zoned.has(sid), sid);
 });
 
 test('one continuous map: the split, its warps and walls are retired; the street grid is one piece', () => {
@@ -94,7 +97,10 @@ test('one continuous map: the split, its warps and walls are retired; the street
   expectError((d) => (d.mapConnections = []), /mapConnections: retired in schema 4/);
   expectError((d) => d.maps.push({ ...d.maps[0], id: 'second-map' }), /maps: exactly one map since schema 4 \(found 2\)/);
   expectError((d) => (d.maps[0].segments = ['seg-37ave-73-74']), /map "jackson-heights": segments is retired in schema 4/);
-  expectError((d) => (d.maps[0].tiles = [MAX_MAP_SIDE + 1, 184]), /longer than 256 on a side/);
+  // Walking-time caps (session 6e): 60 s east-west, 45 s north-south at 150 px/s.
+  assert.equal(WALK_LIMITS.pxPerSecond, 150);
+  expectError((d) => { d.layout.edge = 40; d.maps[0].tiles = [606, 488]; }, /walkable area is 590 tiles wide, 62\.9 s to walk/);
+  expectError((d) => { d.layout.rowsY.at(-1)[1] += 4; d.maps[0].tiles = [554, 440]; }, /walkable area is 424 tiles tall, 45\.2 s to walk/);
   expectError((d) => (d.maps[0].status = 'done'), /status must be one of proposed, built/);
   // Cut 37th Rd, 73rd St and Broadway off from the rest: the node at their corner is unreachable.
   expectError((d) => (d.segments = d.segments.filter((s) => s.from !== 'n-73-37rd' && s.to !== 'n-73-37rd')), /node "n-73-37rd": not connected to the rest of the street grid/);
@@ -134,8 +140,8 @@ test('layout: well-formed, covers every node, and fixes the map\'s tile size', (
   expectError((d) => d.layout.rowsY.pop(), /node "n-75-bway": grid y 3 is outside layout.rowsY/);
   expectError((d) => (d.layout.viewMargin = 7), /layout.viewMargin: must be an integer of at least 8/);
   expectError((d) => (d.layout.stubLength = 3), /layout.stubLength: retired in schema 4/);
-  expectError((d) => (d.maps[0].tiles = [198, 180]), /map "jackson-heights": tiles 198x180 don't match the layout \(198x184\)/);
-  expectError((d) => (d.layout.edge = 7), /map "jackson-heights": tiles 198x184 don't match the layout \(200x186\)/);
+  expectError((d) => (d.maps[0].tiles = [554, 430]), /map "jackson-heights": tiles 554x430 don't match the layout \(554x436\)/);
+  expectError((d) => (d.layout.edge = 15), /map "jackson-heights": tiles 554x436 don't match the layout \(556x438\)/);
 });
 
 test('session 6c decisions still hold: 34th Ave is a paseo, the cross streets join 37th Ave and Roosevelt Ave', () => {
@@ -164,10 +170,57 @@ test('session 6d: the bounds reach two avenues north of Northern Blvd (32nd and 
   }
   const north = byId(real.zones, 'northern-blvd');
   assert.equal(north.name, 'Northern Boulevard');
-  assert.ok(north.segments.every((sid) => { const s = byId(real.segments, sid); return [s.from, s.to].every((nid) => /-(northern|32ave|31ave)$/.test(nid)); }));
+  const flank = (s) => [s.from, s.to].every((nid) => { const x = byId(real.nodes, nid).grid[0]; return x <= 3 || x >= 16; });
+  assert.ok(north.segments.every((sid) => { const s = byId(real.segments, sid); return [s.from, s.to].every((nid) => /-(northern|32ave|31ave)$/.test(nid)) || flank(s); }));
   // Streets that end at Roosevelt from the north (LION T-intersections) don't continue south; 76th St ends at 31st Ave.
   for (const k of [84, 86, 87, 88, 89, 90]) assert.ok(!byId(real.nodes, `n-${k}-roosevelt`).continues?.some((c) => c.dir.includes('S')), k);
   assert.ok(!byId(real.nodes, 'n-76-31ave').continues);
   assert.deepEqual(byId(real.nodes, 'n-elbertson-roosevelt').continues.map((c) => c.dir), ['SE']);
   assert.deepEqual(byId(real.nodes, 'n-britton-roosevelt').continues.map((c) => c.dir), ['SW']);
+});
+
+test('session 6e: every block face has a land-use class (both sides of every segment), from PLUTO or a neighbour', () => {
+  const faces = new Map(real.blockFaces.map((f) => [`${f.segment}/${f.side}`, f]));
+  const ns = new Set(real.streets.filter((s) => s.orientation === 'ns').map((s) => s.id));
+  for (const s of real.segments) for (const side of ns.has(s.street) ? ['east', 'west'] : ['north', 'south']) assert.ok(LAND_USES.includes(faces.get(`${s.id}/${side}`)?.landUse), `${s.id} ${side}`);
+  assert.equal(real.blockFaces.length, 2 * real.segments.length);
+  // Most faces come straight from PLUTO; Travers Park's faces from the Parks outline.
+  assert.ok(real.blockFaces.filter((f) => f.basis === 'pluto').length >= 0.75 * real.blockFaces.length);
+  for (const id of ['bf-34ave-77-78-north', 'bf-77-34ave-northern-east']) assert.equal(real.blockFaces.find((f) => f.id === id).landUse, 'park', id);
+  expectError((d) => d.blockFaces.pop(), /no block face \(land use\)/);
+  expectError((d) => (d.blockFaces[0].landUse = 'mansion'), /landUse must be one of/);
+});
+
+test('session 6e: parks, trees (thinned tile positions), bike lanes and deviations are well-formed and cited', () => {
+  assert.ok(real.parks.some((p) => p.parksId === 'Q303' && p.name === 'Travers Park'));
+  assert.ok(real.trees.tiles.length > 100);
+  assert.equal(real.bikeLanes.length, real.segments.filter((s) => s.street === 'ave-34').length);
+  assert.deepEqual(real.deviations.map((d) => d.id).sort(), ['dev-paseo-bike-lanes', 'dev-paseo-grass']);
+  expectError((d) => d.trees.tiles.push([...d.trees.tiles[0]]), /closer than \d+ tiles/);
+  expectError((d) => (d.parks[0].outline = [[[0, 0]]]), /outline must be rings/);
+  expectError((d) => (d.deviations[0].subject = 'nowhere'), /subject must be an area or a segment/);
+});
+
+test('session 6e privacy: no BBL, address, owner or lot fields anywhere in committed data (src/data and the map asset)', () => {
+  // The rules themselves.
+  assert.deepEqual(privacyProblems({ a: [{ name: 'x' }] }), []);
+  assert.equal(privacyProblems({ bbl: 1 }).length, 1);
+  assert.equal(privacyProblems({ ownername: 'x' }).length, 1);
+  assert.equal(privacyProblems({ note: 'lot 4012340056' }).length, 1);
+  assert.equal(privacyProblems({ note: 'at 12-34 56 Street' }).length, 1);
+  assert.equal(privacyProblems({ address: '' }).length, 1);
+  // Every committed JSON under src/data (the dataset, the maps, strings, orders).
+  const root = new URL('../../src/data/', import.meta.url);
+  const files = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(new URL(`${e.name}/`, dir));
+      else if (e.name.endsWith('.json') && !e.name.startsWith('.')) files.push(new URL(e.name, dir));
+    }
+  };
+  walk(root);
+  // ...and the world map asset (since 6e an external file under public/assets/maps).
+  walk(new URL('../../public/assets/maps/', import.meta.url));
+  assert.ok(files.length >= 5 && files.some((f) => f.pathname.endsWith('public/assets/maps/jackson-heights.json')));
+  for (const f of files) assert.deepEqual(privacyProblems(JSON.parse(readFileSync(f, 'utf8'))), [], f.pathname);
 });
