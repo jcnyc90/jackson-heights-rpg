@@ -4,9 +4,11 @@ export const GAME_WIDTH = 256;
 export const GAME_HEIGHT = 224;
 
 export const TILE_SIZE = 16;
-// Walking speed in px/s: 120 = exactly 2 px per 60 Hz physics step (session 6d). Diagonals move each
-// axis by 1 or 2 px a step so their speed averages the same (see MapScene.planStep).
-export const PLAYER_SPEED = 120;
+// Walking speed in px/s. Session 6e: 150 (owner's decision 4) = 2.5 px per 60 Hz physics step, so
+// the player moves whole pixels, 2 and 3 alternately, through a sub-pixel accumulator (see
+// MapScene.planStep); diagonals move each axis by 1 or 2 px a step so their speed averages the same.
+// (6d: 120 = 2 px a step.)
+export const PLAYER_SPEED = 150;
 export const BG_COLOR = '#1b1528';
 
 /**
