@@ -88,7 +88,14 @@ export class WorldView {
   update(x: number, y: number, force = false): void {
     const v = { x0: (x - GAME_WIDTH / 2) / TILE_SIZE, y0: (y - GAME_HEIGHT / 2) / TILE_SIZE, x1: (x + GAME_WIDTH / 2) / TILE_SIZE, y1: (y + GAME_HEIGHT / 2) / TILE_SIZE };
     const a = this.anchor;
-    if (force || !(v.x0 >= a.x + WINDOW_SLACK && v.y0 >= a.y + WINDOW_SLACK && v.x1 <= a.x + WINDOW.width - WINDOW_SLACK && v.y1 <= a.y + WINDOW.height - WINDOW_SLACK)) {
+    // A side only needs slack where the window doesn't already reach the map's edge there.
+    const W = this.world.width, H = this.world.height;
+    const ok =
+      (a.x <= 0 || v.x0 >= a.x + WINDOW_SLACK) &&
+      (a.y <= 0 || v.y0 >= a.y + WINDOW_SLACK) &&
+      (a.x + WINDOW.width >= W || v.x1 <= a.x + WINDOW.width - WINDOW_SLACK) &&
+      (a.y + WINDOW.height >= H || v.y1 <= a.y + WINDOW.height - WINDOW_SLACK);
+    if (force || Number.isNaN(a.x) || !ok) {
       const cx = Math.floor((v.x0 + v.x1) / 2);
       const cy = Math.floor((v.y0 + v.y1) / 2);
       this.fill(Phaser.Math.Clamp(cx - WINDOW.width / 2, 0, Math.max(0, this.world.width - WINDOW.width)), Phaser.Math.Clamp(cy - WINDOW.height / 2, 0, Math.max(0, this.world.height - WINDOW.height)));
@@ -212,8 +219,9 @@ export class WorldView {
     const top = sign.y - PROP_FRAME.height + 6 - lines.length * h + (sign.kind === 'street' ? 8 : 0);
     lines.forEach((line, n) => {
       const w = [...line].length * FONT.charWidth + 2 * SIGN_PAD;
-      // Street blades stick out on alternating sides of the post; edge plates are centred.
-      const x = sign.kind === 'street' ? (n === 0 ? sign.x - w + 2 : sign.x - 2) : Math.round(sign.x - w / 2);
+      // Street blades stick out east of the post, over the sidewalk corner and the street (posts stand on
+      // the NW corner, so west would cover the corner building); edge plates are centred.
+      const x = sign.kind === 'street' ? sign.x - 2 : Math.round(sign.x - w / 2);
       const y = top + n * h;
       out.push(s.add.rectangle(x - 1, y - 1, w + 2, h, 0x2a1f3d).setOrigin(0).setDepth(depth + 0.01));
       out.push(s.add.rectangle(x, y, w, h - 2, colour).setOrigin(0).setDepth(depth + 0.02));

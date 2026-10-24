@@ -4,7 +4,7 @@ An EarthBound-inspired browser RPG set in Jackson Heights, Queens. Built with Ph
 
 Play it: <https://jcnyc90.github.io/jackson-heights-rpg/>
 
-> **Status: early scaffold.** Jackson Heights from 73rd to 90th St and from Roosevelt Ave up to 31st Ave is one continuous map, generated from NYC city data: a street grid with light grey roads, sidewalks, crosswalks, traffic signals, street-name signs and the elevated 7 over Roosevelt Ave. There's 8-way movement (keyboard or an on-screen thumbstick), a minimap, a placeholder Dispatcher and a first delivery loop with three placeholder orders. All art is placeholder, generated in code. No story, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
+> **Status: early scaffold.** Jackson Heights from 73rd to 90th St and from Roosevelt Ave up to 31st Ave is one continuous map, generated from NYC city data: drawn at 30 tiles a block in a hybrid oblique view: buildings chosen per block face from city land-use data, Travers Park, the grassy 34th Ave paseo with green bike lanes, census street trees, crosswalks, signals with corner-post street signs, the elevated 7 over Roosevelt Ave and barricades where the map ends. There's 8-way movement at 150 px/s (keyboard or an on-screen thumbstick), a circular radar, a placeholder Dispatcher and a first delivery loop with three placeholder orders. All art is placeholder, generated in code. No story, battles or saves yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for locked design decisions and the roadmap.
 
 ## Requirements
 
@@ -29,7 +29,7 @@ Open <http://localhost:5173>. Add `?debug` to the URL to draw collision boxes (d
 
 Touch controls appear only on touch devices. Face an NPC and press Action to talk; Action finishes the current page, then turns the page, then closes the window. You can't walk while the window is open.
 
-**Deliveries:** talk to the Dispatcher on the north sidewalk of Roosevelt Ave between 74th and 75th St (a new game starts next to them) to get an order. The ticket at the bottom of the screen names the intersection to go to ("Pick up: 73rd St & 37th Rd"); the minimap in the top-right corner marks it, an arrow at the screen edge points to it while it's off-screen, and a tag bobs over its door. Face the door and press Action, then do the same at the dropoff. One order at a time; progress is lost on reload (no saves yet).
+**Deliveries:** talk to the Dispatcher on the north sidewalk of Roosevelt Ave between 74th and 75th St (a new game starts next to them) to get an order. The ticket at the bottom of the screen names the intersection to go to ("Pick up: 73rd St & 37th Rd"); the radar in the top-left corner marks it (on its rim while it's off the radar), the top-right corner names the crossing you stand in, an arrow at the screen edge points to it while it's off-screen, and a tag bobs over its door. Face the door and press Action, then do the same at the dropoff. One order at a time; progress is lost on reload (no saves yet).
 
 Street signs at every intersection name the two streets, and a name card shows when you walk into an area (Diversity Plaza, Roosevelt Avenue, 37th Avenue, Historic District, Northern Boulevard).
 
@@ -79,20 +79,25 @@ One-time setup:
 ```
 index.html                 page shell + touch-control markup
 src/
-  main.ts                  Phaser game config
+  main.ts                  loads the external world map, then the game
+  game.ts                  Phaser game config
   config.ts                resolution, tile size, texture keys, sprite layout
   style.css                full-screen layout, touch controls
   scenes/
     BootScene.ts           load maps and the font atlas, generate placeholder art, register animations
     MapScene.ts            plays any registered map: 8-way movement, NPCs, talking, depth sorting, warps + fades,
-                           street signs, minimap, target arrow, zone name cards
+                           radar, corner name, target arrow, zone name cards
     DialogueScene.ts       text window (typewriter, pages), launched over the map
   systems/
     controls.ts            keyboard + touch -> direction / action
     touchControls.ts       on-screen thumbstick + action button (DOM)
     placeholderArt.ts      code-drawn placeholder tiles, sprites and window frame
     font.ts                registers the Spleen 6x12 atlas as a bitmap font; character set
-    maps.ts                map registry; spawns, warps, delivery points, signs, zones, walkable area from Tiled; link checks
+    maps.ts                map registry; spawns, warps, delivery points, signs, corners, zones, walkable area from Tiled; link checks
+    mapLoader.ts           fetches and inflates the external world map (base64 + zlib layers) before the game loads
+    worldView.ts           draws the world map: a sliding ground/collision tile window + sprite bins near the camera
+    worldArt.ts            placeholder buildings (front face, shaded side face, roof strip) and street-furniture sprites
+    radar.ts               the circular radar
     strings.ts             t(id, params) lookup for all player-facing text
     textLayout.ts          word wrap + pagination for the text window
     npcs.ts                reads and validates NPCs from the Tiled "npcs" layer
@@ -102,16 +107,18 @@ src/
     strings/en.json        every player-facing string, keyed by ID
     dialogue.json          dialogue ID -> list of string IDs
     orders.json            delivery orders: pickup, dropoff, item, reward, string IDs
-    maps/index.json        map registry: id, file, display-name string ID; start point
-    maps/*.json            Tiled maps saved by Tiled 1.12: jackson-heights (generated, 198x184) and test-map (hand-made test fixture)
+    maps/index.json        map registry: id, file (bundled) or url (external), display-name string ID; start point
+    maps/test-map.json     hand-made test fixture (Tiled 1.12)
     tiles.json             tile ids of the placeholder tilesets (shared by the art and the generator)
     world/jackson-heights.json  world dataset: streets, nodes, segments, zones, anchors, sources (the generator's input; DESIGN.md 2.14)
+public/assets/maps/jackson-heights.json  the world map (generated, 554x436, zlib layers), fetched at runtime
 public/assets/tilesets/    tiles.png + overhead.png: placeholder tilesets exported for Tiled (see Editing maps)
 public/assets/fonts/spleen-6x12.png  font atlas, generated from the BDF (third-party, BSD-2-Clause)
 third_party/spleen-2.2.0/  Spleen 6x12 BDF and LICENSE, unmodified from the 2.2.0 release (SOURCE.txt)
 scripts/build-font-atlas.mjs  BDF -> PNG atlas converter (no dependencies)
 scripts/validate-world.mjs    world dataset validator: npm run validate:world (no dependencies)
 scripts/generate-maps.mjs     world dataset -> Tiled map: npm run maps:generate / maps:check (needs Tiled)
+tools/                     Python scripts that derive the dataset from raw NYC Open Data kept in gitignored logs/
 tests/browser/             regression, render, touch and live-site checks
 tests/world/               validator and generator tests: npm run test:world (node --test, no dependencies)
 public/THIRD-PARTY-NOTICES.txt  licences of bundled third-party code (served with the game)

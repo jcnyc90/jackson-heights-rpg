@@ -26,6 +26,8 @@ export interface RadarState {
   /** The player's overview pixel (centre of the radar). */
   cx: number;
   cy: number;
+  /** The way the player arrow points (direction of travel, else facing). */
+  dir: Direction8;
   /** Where the target blip is drawn (radar pixels from the centre), and whether it sits on the rim. */
   target: { dx: number; dy: number; onRim: boolean } | null;
 }
@@ -34,7 +36,7 @@ export class Radar {
   readonly image: Phaser.GameObjects.Image;
   /** Outer size in game pixels (diameter + the 1 px ring on each side). */
   readonly size: number;
-  state: RadarState = { cx: 0, cy: 0, target: null };
+  state: RadarState = { cx: 0, cy: 0, dir: 'up', target: null };
   private readonly overview: HTMLCanvasElement;
   private readonly mask: HTMLCanvasElement;
   private readonly tex: Phaser.Textures.CanvasTexture;
@@ -75,7 +77,7 @@ export class Radar {
       }
       tgt = { dx, dy, onRim };
     }
-    this.state = { cx, cy, target: tgt };
+    this.state = { cx, cy, dir, target: tgt };
     const sig = `${cx},${cy},${dir},${tgt ? `${tgt.dx},${tgt.dy},${blinkOn || !tgt.onRim}` : '-'}`;
     if (sig === this.last) return;
     this.last = sig;

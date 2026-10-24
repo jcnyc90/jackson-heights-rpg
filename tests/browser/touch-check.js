@@ -7,6 +7,8 @@
 // Session 6d: the D-pad became a round 8-way thumbstick; the minimap's placement is checked against the
 // controls and the ticket; the touch-only order walks the one world map along 8-way pathfound routes,
 // steering the stick closed-loop (each frame it points the stick toward the next waypoint).
+// Session 6e: the radar (top-left) replaces the minimap and is checked the same way; the world map's
+// collision comes from its decoded collision layer (external map, drawn in chunks).
 // Deterministic frame stepping like regression-suite.js. Returns a results object.
 const g = window.game; const s = g.scene.getScene('Map');
 const FRAME = 1000 / 60; let T = performance.now();
@@ -66,9 +68,9 @@ try {
   pe(stick, 'pointerdown', cx + rad * 0.8, cy, 22); run(200); pe(window, 'pointerup', cx + rad * 0.8, cy, 22); run(50);
   R.warpWithStickHeld.freshPressMovedPx = s.player.x - arrive[0];
 
-  // Order ticket and minimap vs the touch controls: every order and status, the ticket at the bottom and
-  // the top, and the minimap (world map, top right). Rects in CSS px; the controls grow by 3px for their
-  // outline. The minimap must not overlap the ticket either. PASS/FAIL per viewport.
+  // Order ticket and radar vs the touch controls: every order and status, the ticket at the bottom and
+  // the top, and the radar (world map, top left). Rects in CSS px; the controls grow by 3px for their
+  // outline. The radar must not overlap the ticket either. PASS/FAIL per viewport.
   const cr = g.canvas.getBoundingClientRect(); const k = cr.width / 256;
   const grow = (r, m) => [r.left - m, r.top - m, r.right + m, r.bottom + m];
   const ctl = { stick: grow(d, 3), action: grow(a, 3) };
@@ -83,19 +85,17 @@ try {
   const hitsCtl = ticketRects.filter(([, , , r]) => inter(r, ctl.stick) || inter(r, ctl.action)).map(([id, st, y]) => `${id}/${st}/y=${y}`);
   const outside = ticketRects.filter(([, , , r]) => r[0] < cr.left - 0.5 || r[1] < cr.top - 0.5 || r[2] > cr.right + 0.5 || r[3] > cr.bottom + 0.5).length;
   R.ticketVsControls = { checked: ticketRects.length, widestGamePx: Math.max(...ticketRects.map(([, , , r]) => Math.round((r[2] - r[0]) / k))), overlapping: hitsCtl, outsideCanvas: outside, result: hitsCtl.length === 0 && outside === 0 ? 'PASS' : 'FAIL' };
-  const mi = s.minimap.image; const mmGame = [mi.x, mi.y, mi.width, mi.height]; const mmCss = css(...mmGame);
+  const mi = s.radar.image; const mmGame = [mi.x, mi.y, mi.width, mi.height]; const mmCss = css(...mmGame);
   const gameInter = (p, q) => p[0] < q[0] + q[2] && p[0] + p[2] > q[0] && p[1] < q[1] + q[3] && p[1] + p[3] > q[1];
   const mmTicket = ticketRects.filter(([, , y, , gr]) => y !== 24 && gameInter(gr, mmGame)).map(([id, st]) => `${id}/${st}`);
-  R.minimapVsControls = { gameRect: mmGame, hitsStick: inter(mmCss, ctl.stick), hitsAction: inter(mmCss, ctl.action), outsideCanvas: mmCss[0] < cr.left - 0.5 || mmCss[1] < cr.top - 0.5 || mmCss[2] > cr.right + 0.5 || mmCss[3] > cr.bottom + 0.5, hitsTicket: mmTicket };
-  R.minimapVsControls.result = !R.minimapVsControls.hitsStick && !R.minimapVsControls.hitsAction && !R.minimapVsControls.outsideCanvas && mmTicket.length === 0 ? 'PASS' : 'FAIL';
+  R.radarVsControls = { gameRect: mmGame, cssRect: mmCss.map(Math.round), hitsStick: inter(mmCss, ctl.stick), hitsAction: inter(mmCss, ctl.action), outsideCanvas: mmCss[0] < cr.left - 0.5 || mmCss[1] < cr.top - 0.5 || mmCss[2] > cr.right + 0.5 || mmCss[3] > cr.bottom + 0.5, hitsTicket: mmTicket };
+  R.radarVsControls.result = !R.radarVsControls.hitsStick && !R.radarVsControls.hitsAction && !R.radarVsControls.outsideCanvas && mmTicket.length === 0 ? 'PASS' : 'FAIL';
 
   // One order, touch only: Dispatcher (Action) -> thumbstick along pathfound 8-way routes -> pick up -> deliver.
   const MAPS = await import('/src/systems/maps.ts');
-  const info = MAPS.getMap(worldId); const dd = info.data; const ts = dd.tilesets.find((t) => t.name === 'tiles');
-  const solid = new Set((ts.tiles ?? []).filter((t) => t.properties?.some((p) => p.name === 'collides' && p.value === true)).map((t) => t.id + ts.firstgid));
-  const obs = dd.layers.find((l) => l.name === 'obstacles').data; const npcTiles = new Set((dd.layers.find((l) => l.name === 'npcs')?.objects ?? []).map((o) => `${Math.floor(o.x / 16)},${Math.floor((o.y - 1) / 16)}`));
+  const info = MAPS.getMap(worldId); const dd = info.data; const npcTiles = new Set((dd.layers.find((l) => l.name === 'npcs')?.objects ?? []).map((o) => `${Math.floor(o.x / 16)},${Math.floor((o.y - 1) / 16)}`));
   const wk = info.walk; const inWalk = (tx, ty) => tx * 16 >= wk.x && ty * 16 >= wk.y && tx * 16 < wk.x + wk.width && ty * 16 < wk.y + wk.height;
-  const open = (tx, ty) => tx >= 0 && ty >= 0 && tx < dd.width && ty < dd.height && inWalk(tx, ty) && !solid.has(obs[ty * dd.width + tx]) && !npcTiles.has(`${tx},${ty}`);
+  const open = (tx, ty) => tx >= 0 && ty >= 0 && tx < dd.width && ty < dd.height && inWalk(tx, ty) && !info.world.solid[ty * dd.width + tx] && !npcTiles.has(`${tx},${ty}`);
   const tileAt = (x, y) => [Math.floor(x / 16), Math.floor((y - 1) / 16)];
   const STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1]]; const STEPS8 = [...STEPS, [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const DIR = { '1,0': 'right', '-1,0': 'left', '0,1': 'down', '0,-1': 'up' };

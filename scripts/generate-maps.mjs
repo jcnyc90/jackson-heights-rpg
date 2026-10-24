@@ -656,6 +656,9 @@ export function buildMaps(world, opts = {}) {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (const c of [stand, out]) if (inMap(c[0] + dx, c[1] + dy)) crossing[idx(c[0] + dx, c[1] + dy)] = 1;
     if (a.uses.includes('dispatcher')) {
       b.dispatch = true;
+      // The Dispatcher's tile blocks like a wall: separating from their immovable body alone could push
+      // the player into the facade behind them.
+      solid[idx(...stand)] = 1;
       if (!standOk(out)) throw new Error(`anchor "${a.id}": no walkable tile in front of the Dispatcher`);
       const [fx, fy] = feet(stand);
       npcs.push({
@@ -704,7 +707,8 @@ export function buildMaps(world, opts = {}) {
     const [di, dj] = [Math.floor(d.x / T), Math.floor((d.y - 1) / T)];
     const c = [di + START.fromDispatcher[0], dj + START.fromDispatcher[1]];
     if (!walkableCls(...c) || solid[idx(...c)]) throw new Error(`start spawn: tile ${c} is not walkable`);
-    for (const [dx, dy] of [[0, 0], [-1, 0], [-2, 0], [-1, -1]]) reserved[idx(c[0] + dx, c[1] + dy)] = 1;
+    // Keep the start's row clear two tiles each way (a new game can walk off in any direction).
+    for (let dx = -3; dx <= 3; dx++) for (let dy = -1; dy <= 1; dy++) if (inMap(c[0] + dx, c[1] + dy)) crossing[idx(c[0] + dx, c[1] + dy)] = 1;
     const [fx, fy] = feet(c);
     objects.unshift({ name: 'start', type: 'spawn', point: true, x: fx, y: fy, properties: [prop('facing', START.facing), prop('spawnId', 'start')] });
   }
