@@ -26,10 +26,13 @@ Open <http://localhost:5173>. Add `?debug` to the URL to draw collision boxes (d
 |--------|----------|-------|
 | Move (8-way; two keys for a diagonal) | Arrow keys / WASD | On-screen thumbstick |
 | Action (talk / next page) | Space / Enter / Z | Round button |
+| Speed x1 / x2 / x4 / x8 | 0 / 1 / 2 / 3 | The four round buttons under the thumbstick |
 
 Touch controls appear only on touch devices. Face an NPC and press Action to talk; Action finishes the current page, then turns the page, then closes the window. You can't walk while the window is open.
 
 **Deliveries:** talk to the Dispatcher on the north sidewalk of Roosevelt Ave between 74th and 75th St (a new game starts next to them) to get an order. The ticket at the bottom of the screen names the intersection to go to ("Pick up: 73rd St & 37th Rd"); the radar in the top-left corner marks it (on its rim while it's off the radar), the top-right corner names the crossing you stand in, an arrow at the screen edge points to it while it's off-screen, and a tag bobs over its door. Face the door and press Action, then do the same at the dropoff. One order at a time; progress is lost on reload (no saves yet).
+
+**Bike Share:** docks stand at the real bike-share station corners. Face a docked bike and press Action, answer Yes, and you ride at twice walking speed (anywhere you can walk; doors, the Dispatcher and orders work from the bike). To get off, press Action at any dock with a free slot and answer Yes. Each dock starts with 3 bikes; counts last until you reload. The speed setting (0-3: x1, x2, x4, x8) multiplies walking or riding and holds until you change it.
 
 Street signs at every intersection name the two streets, and a name card shows when you walk into an area (Diversity Plaza, Roosevelt Avenue, 37th Avenue, Historic District, Northern Boulevard).
 
@@ -168,8 +171,9 @@ The street layout is hand-drawn using public NYC data as a reference only. `src/
 - **Historic Districts**, NYC Landmarks Preservation Commission; **Pedestrian Plazas**, NYC Department of Transportation; **Parks Properties**, NYC Department of Parks and Recreation. All via NYC Open Data, which has no restrictions on use.
 - **Subway Stations** and **Subway Entrances and Exits: 2024**, Metropolitan Transportation Authority, via data.ny.gov (OPEN-NY Terms of Use).
 - Queens Pride Parade route: NYPD traffic advisory (June 2023) and NYC DOT's 2026 closures as reported by CBS New York.
+- Bike-share dock positions (session 6f, a one-time exception for station positions only): Citi Bike's public GBFS `station_information` feed, fetched 2026-10-25, used under the Citi Bike Data License Agreement. Only station ids, corner labels and snapped map tiles are committed. The game shows a generic "Bike Share" and is not affiliated with, approved or endorsed by Citi Bike, Lyft or Citigroup.
 
-This game isn't endorsed by the City of New York, its agencies, the State of New York or the MTA. The layout is simplified and stylized: don't use it for navigation. Exact URLs and versions are in the dataset's `sources` and in [`docs/DESIGN.md` §2.14](docs/DESIGN.md#214-world-dataset-sessions-6a-6b).
+This game isn't endorsed by the City of New York, its agencies, the State of New York, the MTA or the bike-share operator. The layout is simplified and stylized: don't use it for navigation. Exact URLs and versions are in the dataset's `sources` and in [`docs/DESIGN.md` §2.14](docs/DESIGN.md#214-world-dataset-sessions-6a-6b).
 
 ## Editing maps
 

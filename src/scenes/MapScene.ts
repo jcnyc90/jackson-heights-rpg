@@ -29,6 +29,7 @@ import { insideWarp, resolveDestination, START, type DeliveryPoint, type DockRec
 import { DIALOGUE, readNpcSpawns, type NpcSpawn } from '../systems/npcs';
 import { orderParams, placeName } from '../systems/orders';
 import { Radar } from '../systems/radar';
+import { showSpeed } from '../systems/touchControls';
 import { t } from '../systems/strings';
 import { WorldView } from '../systems/worldView';
 import type { DialogueData, DialogueScene } from './DialogueScene';
@@ -45,9 +46,10 @@ const OPPOSITE: Record<Direction, Direction> = { up: 'down', down: 'up', left: '
 const EMOTE_MS = 500;
 const NAME_CARD_MS = ZONE_CARD.showMs;
 /**
- * Pixels per physics step: 2.5 at every speed (whole pixels via the accumulator, 2 and 3 alternately). Walking at
- * PLAYER_SPEED the physics runs at 60 Hz; faster (riding, the speed setting: session 6f) it runs proportionally
- * more steps a second, so no step moves more than 3 px and the player can't pass through a wall or a prop.
+ * Pixels per physics step: 2.5 at every speed (whole pixels via the accumulator, 2 and 3 alternately; 4 for the one
+ * step where a diagonal starts sliding along a wall, carrying the diagonal's leftover). Walking at PLAYER_SPEED the
+ * physics runs at 60 Hz; faster (riding, the speed setting: session 6f) it runs proportionally more steps a second,
+ * so no step moves more than 4 px and the player can't pass through a wall (16 px), a prop or an NPC's feet (8 px).
  */
 const STEP_PX = PLAYER_SPEED / 60;
 // Sprites sort by feet y (their depth): characters, and on the world map buildings, trees, posts
@@ -258,6 +260,7 @@ export class MapScene extends Phaser.Scene {
 
     this.controls = new Controls(this);
     this.warpArmed = !this.warpUnderFeet();
+    showSpeed(this.state.speedLevel);
 
     if (data.viaWarp) {
       this.warping = true;
@@ -276,6 +279,8 @@ export class MapScene extends Phaser.Scene {
     // Read input every frame, even while locked, so presses made during a fade are swallowed.
     const action = this.controls.actionPressed();
     const dir = this.controls.direction();
+    const speedLevel = this.controls.speedPressed();
+    if (speedLevel !== null && speedLevel !== this.state.speedLevel) this.setSpeedLevel(speedLevel);
 
     if (this.warping) {
       this.stopWalking();
@@ -324,7 +329,7 @@ export class MapScene extends Phaser.Scene {
     // after update), so read the body to avoid trailing the player by a frame.
     const { body } = this.player;
     this.player.setDepth(body.bottom);
-    this.world?.update(body.center.x, body.bottom);
+    this.world?.update(body.center.x, body.bottom, false, this.speed());
     if (this.emote.visible) {
       this.emote.setPosition(body.center.x, body.bottom - PLAYER_FRAME.height - 1);
       if (time >= this.emoteHideAt) this.emote.setVisible(false);
@@ -374,7 +379,16 @@ export class MapScene extends Phaser.Scene {
   /** Physics steps a second for the current speed, so every step stays STEP_PX (60 Hz walking at x1, up to 960 Hz). */
   private applySpeed(): void {
     const fps = (60 * this.speed()) / PLAYER_SPEED;
-    if (this.physics.world.fps !== fps) this.physics.world.setFPS(fps);
+    if (this.physics.world.fps === fps) return;
+    this.physics.world.setFPS(fps);
+    if (this.moveDir) this.planStep(); // the velocity of the planned step follows the new step rate
+  }
+
+  /** The speed buttons and keys 0-3 (owner's decision 5): x1, x2, x4, x8 of the current base speed; held until changed. */
+  private setSpeedLevel(level: number): void {
+    this.state.speedLevel = level;
+    this.applySpeed();
+    showSpeed(level);
   }
 
   /**
@@ -394,9 +408,13 @@ export class MapScene extends Phaser.Scene {
     this.applySpeed();
   }
 
-  /** After each physics step: keep the leftover sub-pixel progress, then plan the next step. */
+  /**
+   * After each physics step: keep the collision window around the player (session 6f: at high speed a long frame
+   * runs many steps), keep the leftover sub-pixel progress, then plan the next step.
+   */
   private onWorldStep(): void {
     if (!this.moveDir) return;
+    this.world?.keepWindow(this.player.body.center.x, this.player.body.bottom);
     const step = STEP[this.moveDir];
     const b = this.player.body.blocked;
     const blockedX = (step.x < 0 && b.left) || (step.x > 0 && b.right);

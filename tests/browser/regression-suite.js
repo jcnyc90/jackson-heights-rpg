@@ -1030,6 +1030,88 @@ try {
       check('X11 riding survives a scene restart; a reset leaves the player on foot at 60 Hz', [afterRestart, [s.player.texture.key, s.physics.world.fps]], [['rider', 120, 10], ['player', 60]]);
     }
   }
+
+  // ---- Y. Speed buttons (6f, owner's decision 5): 0/1/2/3 = x1/x2/x4/x8 of walking or riding; physics steps of
+  // 2.5 px on average and never over 4 px (no tunneling), wall sliding, whole pixels at every speed. Needs the
+  // speedButtons flag (or ?features=speedButtons). A step is 4 px only when a diagonal starts sliding along a wall:
+  // the sliding axis carries the diagonal's leftover sub-pixel (as walking has since 6d).
+  if (!CFG.FEATURES.speedButtons) R['Y0 info: speed'] = 'speedButtons flag off: Y skipped';
+  else {
+    s.state.reset(); gotoMap(WORLD_MAP, 'start');
+    const evk = (type, n, pad = false) => window.dispatchEvent(new KeyboardEvent(type, { key: String(n), code: pad ? `Numpad${n}` : `Digit${n}`, keyCode: (pad ? 96 : 48) + n, which: (pad ? 96 : 48) + n, bubbles: true }));
+    const keyLevel = (n, pad = false) => { evk('keydown', n, pad); run(FRAME); evk('keyup', n, pad); run(FRAME); };
+    const tapLevel = (n) => { document.querySelector(`.speed-btn[data-level="${n}"]`).dispatchEvent(new PointerEvent('pointerdown', { pointerId: 40 + n, pointerType: 'touch', bubbles: true, cancelable: true })); run(FRAME); };
+    const lit = () => [...document.querySelectorAll('.speed-btn.on')].map((b) => +b.dataset.level);
+    const speedState = () => [s.state.speedLevel, s.speed(), s.physics.world.fps, lit()];
+    const ride = (on) => { s.state.riding = on; s.applyRider(); run(FRAME); };
+    // Y1. Keys 0-3 (top row and keypad) and the buttons set x1/x2/x4/x8; the pressed one stays lit; the setting holds (walking, a restart) until another press.
+    const y1 = {};
+    for (const n of [0, 1, 2, 3]) { keyLevel(n); y1[`key${n}`] = speedState(); }
+    keyLevel(1, true); y1.numpad1 = speedState(); tapLevel(2); y1.tap2 = speedState(); tapLevel(3); y1.tap3 = speedState();
+    holdKeys(['ArrowLeft'], 10); y1.afterWalk = speedState(); s.scene.restart({}); run(100); y1.afterRestart = speedState();
+    ride(true); y1.riding = speedState(); keyLevel(0); y1.riding0 = speedState(); ride(false); y1.walking0 = speedState();
+    check('Y1 speed keys 0-3 (and keypad) and buttons: x1/x2/x4/x8 of walking (150 px/s) or riding (300), physics steps scaled to match; the pressed one stays lit and holds until another press',
+      y1, { key0: [0, 150, 60, [0]], key1: [1, 300, 120, [1]], key2: [2, 600, 240, [2]], key3: [3, 1200, 480, [3]], numpad1: [1, 300, 120, [1]], tap2: [2, 600, 240, [2]], tap3: [3, 1200, 480, [3]],
+        afterWalk: [3, 1200, 480, [3]], afterRestart: [3, 1200, 480, [3]], riding: [3, 2400, 960, [3]], riding0: [0, 300, 120, [0]], walking0: [0, 150, 60, [0]] });
+    // A long free road row (for straight runs at speed) and a long facade (for sliding).
+    let longRow = null; for (let ty = wy0 + 20; ty < wy0 + 200 && !longRow; ty++) for (let tx = wx0 + 2; tx < wx0 + 60 && !longRow; tx++) { let ok = true; for (let k2 = 0; k2 < 140 && ok; k2++) ok = GW.open(tx + k2, ty); if (ok) longRow = [tx, ty]; }
+    let facade = null; for (let ty = R37 - 60; ty < R37 + 60 && !facade; ty++) for (let tx = C80 - 120; tx < C80 + 120 && !facade; tx++) { let ok = true; for (let k2 = 0; k2 < 18 && ok; k2++) ok = GW.open(tx + k2, ty) && !GW.open(tx + k2, ty - 1) && WD.buildings.some((b) => tx + k2 >= b.x && tx + k2 < b.x + b.w && ty - 1 >= b.y && ty - 1 < b.y + b.h); if (ok) facade = [tx, ty]; }
+    // Per physics step: the largest move on either axis, and any overlap of the feet box with a solid tile of the full map, an NPC or the walk edge.
+    const stepLog = { max: 0, bad: 0, steps: 0, last: null };
+    const npcHit = () => s.npcs.some((n) => { const a = s.player.body, b = n.sprite.body; return a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y; });
+    const inWalkB = () => { const b = s.player.body, w = wi.walk; return b.x >= w.x && b.y >= w.y && b.right <= w.x + w.width && b.bottom <= w.y + w.height; };
+    const solidHit = () => { const b = s.player.body, e = 0.01; for (let ty = Math.floor(b.y / 16); ty <= Math.floor((b.y + b.height - e) / 16); ty++) for (let tx = Math.floor(b.x / 16); tx <= Math.floor((b.x + b.width - e) / 16); tx++) if (WD.solid[ty * WD.width + tx]) return true; return false; };
+    const onStep = () => { const b = s.player.body; if (stepLog.last) stepLog.max = Math.max(stepLog.max, Math.abs(b.x - stepLog.last[0]), Math.abs(b.y - stepLog.last[1])); stepLog.last = [b.x, b.y]; stepLog.steps++; if (solidHit() || npcHit() || !inWalkB()) stepLog.bad++; };
+    const watchSteps = (on) => { stepLog.last = null; s.physics.world[on ? 'on' : 'off']('worldstep', onStep); };
+    // Y2. Each speed, walking and riding: a straight run east moves base/60 x 2^level px a frame (whole pixels), in physics steps of at most 3 px.
+    const y2 = {}; const y2want = {};
+    for (const riding of [false, true]) for (const n of [0, 1, 2, 3]) {
+      ride(riding); keyLevel(n); feetAt(...longRow); run(FRAME); watchSteps(true); stepLog.max = 0;
+      const tr = holdKeys(['ArrowRight'], 9); watchSteps(false);
+      const per = tr.slice(2).map(([x], i) => x - tr[i + 1][0]);
+      const want = ((riding ? 300 : 150) * 2 ** n) / 60;
+      y2[`${riding ? 'ride' : 'walk'}x${2 ** n}`] = [per.reduce((a, b) => a + b, 0) / per.length, tr.every(([x, y]) => Number.isInteger(x) && Number.isInteger(y)), stepLog.max <= 3];
+      y2want[`${riding ? 'ride' : 'walk'}x${2 ** n}`] = [n === 0 && !riding ? per.reduce((a, b) => a + b, 0) / per.length : want, true, true];
+    }
+    ride(false); keyLevel(0);
+    check('Y2 every speed, walking and riding: px a frame = speed / 60 (walking x1 alternates 2 and 3), whole pixels, physics steps of at most 3 px in a straight run', [y2, y2.walkx1[0] === 2.5 || Math.abs(y2.walkx1[0] - 2.5) <= 0.5], [y2want, true]);
+    // Y3. Collision fuzz at x8 walking (1200 px/s) and x8 riding (2400 px/s): 30 seeded random 8-way runs each, checked after every physics step.
+    const fuzz = (riding) => {
+      gotoMap(WORLD_MAP, 'start'); ride(riding); keyLevel(3); stepLog.bad = 0; stepLog.max = 0; stepLog.steps = 0; watchSteps(true);
+      let seed = riding ? 11 : 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      const dirs = [['ArrowUp'], ['ArrowDown'], ['ArrowLeft'], ['ArrowRight'], ['ArrowUp', 'ArrowRight'], ['ArrowDown', 'ArrowLeft'], ['ArrowUp', 'ArrowLeft'], ['ArrowDown', 'ArrowRight']];
+      for (let i = 0; i < 30; i++) { const d2 = dirs[Math.floor(rnd() * 8)]; for (const k2 of d2) ev('keydown', k2); run(Math.round(200 + rnd() * 1200)); for (const k2 of d2) ev('keyup', k2); run(FRAME); }
+      watchSteps(false); const out = [stepLog.bad, stepLog.max, stepLog.steps]; keyLevel(0); ride(false); return out;
+    };
+    const fw = fuzz(false), fr = fuzz(true);
+    R['Y3 info: x8 fuzz (bad steps / largest step px / steps), walking and riding'] = `${fw.join(' / ')}; ${fr.join(' / ')}`;
+    check('Y3 no tunneling at x8 walking and x8 riding: after every physics step of 30 random runs each, the feet box overlaps no solid tile, NPC or the walk edge; no step over 4 px',
+      [fw[0], fw[1] <= 4, fw[2] > 5000, fr[0], fr[1] <= 4, fr[2] > 10000], [0, true, true, 0, true, true]);
+    // Y4. Wall sliding at every speed: up-right along a building front (the longest straight one is 18 tiles: 7 frames, the
+    // last 4 measured), the player keeps full speed east and stays against the wall.
+    const y4 = {}; const y4want = {};
+    for (const riding of [false, true]) for (const n of [0, 1, 2, 3]) {
+      ride(riding); keyLevel(n); at(facade[0] * 16 + 8, facade[1] * 16 + 8); run(FRAME); // feet box flush against the wall
+      const tr = holdKeys(['ArrowUp', 'ArrowRight'], 7); const per = tr.slice(3).map(([x], i) => x - tr[i + 2][0]);
+      const want = ((riding ? 300 : 150) * 2 ** n) / 60;
+      const name = `${riding ? 'ride' : 'walk'}x${2 ** n}`;
+      y4[name] = [Math.abs(per.reduce((a, b) => a + b, 0) / per.length - want) <= 0.5, tr.slice(2).every(([, y]) => y === tr[2][1]), s.player.body.y === facade[1] * 16];
+      y4want[name] = [true, true, true];
+    }
+    ride(false); keyLevel(0);
+    check('Y4 wall sliding at every speed, walking and riding: pressing up-right along a building front keeps full speed east, flush against the wall', y4, y4want);
+    // Y5. A long frame (200 ms, the most Phaser's clock gives one frame) at x8 riding toward a wall: 80 steps, none through it; the collision window follows.
+    const col5 = [...Array(18).keys()].map((k2) => facade[0] + k2).find((tx) => [...Array(9).keys()].every((k2) => GW.open(tx, facade[1] + k2)));
+    gotoMap(WORLD_MAP, 'start'); ride(true); keyLevel(3); feetAt(col5, facade[1] + 8); run(FRAME); watchSteps(true); stepLog.bad = 0; stepLog.max = 0;
+    ev('keydown', 'ArrowUp'); run(FRAME); T += 200; g.step(T, 200); frames++; ev('keyup', 'ArrowUp'); run(FRAME); watchSteps(false);
+    const longFrame = [stepLog.bad, stepLog.max <= 4, s.player.body.y === facade[1] * 16];
+    T += 200; ev('keydown', 'ArrowLeft'); g.step(T, 200); frames++; ev('keyup', 'ArrowLeft'); run(FRAME);
+    const a2 = s.world.anchor; const bodyT = [s.player.body.x / 16, s.player.body.y / 16];
+    keyLevel(0); ride(false);
+    check('Y5 a 200 ms frame at x8 riding: into a wall, no step passes it (0 overlaps, steps of 4 px or less, stopped flush); along the street, the collision window still holds the player',
+      [longFrame, bodyT[0] >= a2.x + 1 && bodyT[0] < a2.x + 47 && bodyT[1] >= a2.y + 1 && bodyT[1] < a2.y + 39], [[0, true, true], true]);
+    s.state.reset(); s.scene.restart({}); run(100);
+  }
 } catch (e) {
   R.ERROR = String(e && e.stack || e);
 } finally {

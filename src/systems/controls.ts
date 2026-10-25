@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { DIRECTIONS_8, STEP, type Direction, type Direction8 } from '../config';
+import { DIRECTIONS_8, FEATURES, STEP, type Direction, type Direction8 } from '../config';
 import { touchState } from './touchControls';
 
 const { KeyCodes } = Phaser.Input.Keyboard;
@@ -11,6 +11,13 @@ const DIRECTION_KEYS: Record<Direction, number[]> = {
   right: [KeyCodes.RIGHT, KeyCodes.D],
 };
 const ACTION_KEYS = [KeyCodes.SPACE, KeyCodes.ENTER, KeyCodes.Z];
+/** Speed keys 0-3 (session 6f), top row and keypad: index = speed level. */
+const SPEED_KEYS = [
+  [KeyCodes.ZERO, KeyCodes.NUMPAD_ZERO],
+  [KeyCodes.ONE, KeyCodes.NUMPAD_ONE],
+  [KeyCodes.TWO, KeyCodes.NUMPAD_TWO],
+  [KeyCodes.THREE, KeyCodes.NUMPAD_THREE],
+];
 
 /**
  * Merges keyboard and on-screen touch input into one 8-way direction + action (session 6d:
@@ -25,6 +32,7 @@ const ACTION_KEYS = [KeyCodes.SPACE, KeyCodes.ENTER, KeyCodes.Z];
 export class Controls {
   private readonly directionKeys: [Direction, Phaser.Input.Keyboard.Key][] = [];
   private readonly actionKeys: Phaser.Input.Keyboard.Key[];
+  private readonly speedKeys: Phaser.Input.Keyboard.Key[][] = [];
   private readonly staleKeys = new Set<Phaser.Input.Keyboard.Key>();
   /** Thumbstick presses up to this count are stale (see touchState.stickPresses). */
   private staleStickPresses = -1;
@@ -38,6 +46,7 @@ export class Controls {
       for (const code of codes) this.directionKeys.push([dir, keyboard.addKey(code)]);
     }
     this.actionKeys = ACTION_KEYS.map((code) => keyboard.addKey(code));
+    if (FEATURES.speedButtons) for (const codes of SPEED_KEYS) this.speedKeys.push(codes.map((code) => keyboard.addKey(code)));
     for (const key of this.allKeys()) {
       key.on(Phaser.Input.Keyboard.Events.DOWN, (_key: unknown, event: KeyboardEvent) => {
         if (this.locked || event.repeat) this.staleKeys.add(key);
@@ -89,6 +98,15 @@ export class Controls {
     return pressed && !this.locked;
   }
 
+  /** The speed level (0-3) pressed this frame, by key or speed button (session 6f), else null. Swallowed while locked. */
+  speedPressed(): number | null {
+    let level = touchState.takeSpeed();
+    this.speedKeys.forEach((keys, n) => {
+      for (const key of keys) if (Phaser.Input.Keyboard.JustDown(key) && !key.metaKey && !this.staleKeys.has(key)) level = n;
+    });
+    return this.locked ? null : level;
+  }
+
   /** Locking makes every key and thumbstick press held right now stale (ignored until released). */
   setLocked(locked: boolean): void {
     this.locked = locked;
@@ -102,6 +120,6 @@ export class Controls {
   }
 
   private allKeys(): Phaser.Input.Keyboard.Key[] {
-    return [...this.directionKeys.map(([, key]) => key), ...this.actionKeys];
+    return [...this.directionKeys.map(([, key]) => key), ...this.actionKeys, ...this.speedKeys.flat()];
   }
 }
