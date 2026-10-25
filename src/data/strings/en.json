@@ -93,5 +93,18 @@
   "hud.order.assigned": "{item}: not picked up",
   "hud.order.picked-up": "{item}: picked up",
   "hud.go.assigned": "Pick up: {place}",
-  "hud.go.picked-up": "Deliver: {place}"
+  "hud.go.picked-up": "Deliver: {place}",
+
+  "choice.yes": "Yes",
+  "choice.no": "No",
+  "bike.name": "Bike Share",
+  "bike.rent.ask": "A {name} dock. Bikes here: {count}. Ride one?",
+  "bike.empty": "This {name} dock is empty right now. Try another one.",
+  "bike.return.ask": "Return your bike to this {name} dock?",
+  "bike.full": "This {name} dock is full. Try another one.",
+  "speed.0": "0",
+  "speed.1": "1",
+  "speed.2": "2",
+  "speed.3": "3",
+  "speed.label": "Speed"
 }

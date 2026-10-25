@@ -1,3 +1,5 @@
+import features from './data/features.json';
+
 // Internal render resolution (EarthBound's 256x224). The canvas is scaled to fit the
 // screen with nearest-neighbour filtering, so pixels stay crisp at any size.
 export const GAME_WIDTH = 256;
@@ -28,6 +30,7 @@ export const TEXTURES = {
   deliveryPoint: 'delivery-point',
   targetArrow: 'target-arrow',
   beacon: 'target-beacon',
+  rider: 'rider',
 } as const;
 
 /** Each half of a warp's fade (out, then in on the next map). Input is locked throughout. */
@@ -54,6 +57,15 @@ export const STEP: Record<Direction8, { x: -1 | 0 | 1; y: -1 | 0 | 1 }> = {
 
 /** Player sheet: one row per direction, columns = [stand, step A, step B]. */
 export const PLAYER_FRAME = { width: 16, height: 24, columns: 3 } as const;
+
+/**
+ * Rider sheet (session 6f): the player on a rented bike, laid out like the player sheet (one row per direction,
+ * columns = [coasting, pedal A, pedal B]); larger, so the bike fits. The feet box stays PLAYER_FEET.
+ */
+export const RIDER_FRAME = { width: 24, height: 32, columns: 3 } as const;
+
+/** Riding speed in px/s (session 6f, Claude's suggestion): twice walking. The speed setting multiplies it too. */
+export const RIDE_SPEED = 300;
 
 /** Player collision box, centred at the bottom of the frame (feet). NPCs use the same box. */
 export const PLAYER_FEET = { width: 10, height: 8 } as const;
@@ -105,3 +117,20 @@ export const ZONE_CARD = { settleMs: 300, showMs: 1500 } as const;
 
 /** Typewriter speed. 30 chars/s = one character every 2 frames at 60 fps. */
 export const TEXT_CHARS_PER_SECOND = 30;
+
+/**
+ * Feature flags (session 6f, src/data/features.json): new systems ship switched off and are switched on
+ * together in the session's last stage. Dev builds can switch them on for one page load with
+ * ?features=riding,speedButtons (the browser checks use it while a flag is still off).
+ */
+const DEV_FEATURES = import.meta.env.DEV ? (new URLSearchParams(location.search).get('features') ?? '').split(',') : [];
+export const FEATURES = {
+  riding: features.riding || DEV_FEATURES.includes('riding'),
+  speedButtons: features.speedButtons || DEV_FEATURES.includes('speedButtons'),
+} as const;
+
+/**
+ * Bike share (session 6f). Docks and their slots come from the map's "docks" layer; each starts with
+ * `bikesAtStart` bikes (owner's decision 3). Counts live in gameState for the session (not saved).
+ */
+export const BIKE_SHARE = { bikesAtStart: 3 } as const;

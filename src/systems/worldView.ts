@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import tileIds from '../data/tiles.json';
 import { FONT, GAME_HEIGHT, GAME_WIDTH, TEXTURES, TILE_SIZE } from '../config';
 import type { WorldBuilding, WorldData } from './mapLoader';
-import type { MapInfo, StreetSign } from './maps';
+import type { DockRect, MapInfo, StreetSign } from './maps';
 import { t } from './strings';
 import { PROP_FRAME, PROP_NAMES, PROPS_TEXTURE, buildingTexture, signPanel } from './worldArt';
 
@@ -11,7 +11,7 @@ import { PROP_FRAME, PROP_NAMES, PROPS_TEXTURE, buildingTexture, signPanel } fro
 // - Ground and collision: one tilemap "window" of WINDOW tiles around the camera, refilled from the
 //   decoded arrays whenever the camera nears its edge. The collision layer is invisible; the player
 //   collides with it (Arcade), so walls never have seams between chunks.
-// - Buildings, props and signs: sprites created per BIN x BIN-tile bin near the camera, destroyed
+// - Buildings, props, signs and bike-share docks (6f): sprites created per BIN x BIN-tile bin near the camera, destroyed
 //   once it's far away. Depth = their foot's y, like characters, so the player passes in front of
 //   and behind them (owner's decision 1).
 
@@ -41,6 +41,7 @@ interface Bin {
   buildings: WorldBuilding[];
   props: number[];
   signs: StreetSign[];
+  docks: DockRect[];
 }
 
 export class WorldView {
@@ -53,6 +54,8 @@ export class WorldView {
   private readonly binCols: number;
   private readonly live = new Map<number, Phaser.GameObjects.GameObject[]>();
   private frame = 0;
+  /** The docked-bike sprites of every live dock, by dock id (redrawn when a count changes). */
+  private readonly dockBikes = new Map<string, Phaser.GameObjects.Image[]>();
   /** How many times the window was refilled (the browser checks read it). */
   refills = 0;
 
@@ -61,6 +64,8 @@ export class WorldView {
     info: MapInfo,
     private readonly world: WorldData,
     depths: { ground: number; collision: number },
+    /** Bikes docked at a dock right now (session 6f: gameState). */
+    private readonly bikesAt: (dockId: string) => number = () => 0,
   ) {
     this.map = scene.make.tilemap({ tileWidth: TILE_SIZE, tileHeight: TILE_SIZE, width: WINDOW.width, height: WINDOW.height });
     const tiles = this.map.addTilesetImage(TEXTURES.tiles, TEXTURES.tiles, TILE_SIZE, TILE_SIZE, 0, 0, 0);
@@ -74,11 +79,12 @@ export class WorldView {
     // Bins: every building (by its image's bottom centre), prop and sign (by their foot).
     this.binCols = Math.ceil(world.width / BIN);
     const rows = Math.ceil(world.height / BIN);
-    for (let i = 0; i < this.binCols * rows; i++) this.bins.push({ buildings: [], props: [], signs: [] });
+    for (let i = 0; i < this.binCols * rows; i++) this.bins.push({ buildings: [], props: [], signs: [], docks: [] });
     const binOf = (tx: number, ty: number) => Math.floor(Phaser.Math.Clamp(ty, 0, world.height - 1) / BIN) * this.binCols + Math.floor(Phaser.Math.Clamp(tx, 0, world.width - 1) / BIN);
     for (const b of world.buildings) this.bins[binOf(b.x + b.w / 2, b.y + b.h - 1)].buildings.push(b);
     for (let k = 0; k < world.props.length; k++) if (PROP_FRAME_OF.has(world.props[k])) this.bins[binOf(k % world.width, Math.floor(k / world.width))].props.push(k);
     for (const s of info.signs) this.bins[binOf(s.x / TILE_SIZE, s.y / TILE_SIZE - 1)].signs.push(s);
+    for (const d of info.docks) this.bins[binOf(d.x / TILE_SIZE, d.y / TILE_SIZE)].docks.push(d);
   }
 
   /**
@@ -154,6 +160,7 @@ export class WorldView {
       const bx = id % this.binCols, by = Math.floor(id / this.binCols);
       if (bx < keep.bx0 || bx > keep.bx1 || by < keep.by0 || by > keep.by1) {
         for (const o of objs) o.destroy();
+        for (const d of this.bins[id].docks) this.dockBikes.delete(d.dockId);
         this.live.delete(id);
         dropped = true;
       }
@@ -200,7 +207,49 @@ export class WorldView {
       out.push(s.add.image(i * T + T / 2, (j + 1) * T, PROPS_TEXTURE, PROP_FRAME_OF.get(this.world.props[k])).setOrigin(0.5, 1).setDepth((j + 1) * T));
     }
     for (const sign of bin.signs) out.push(...this.addSign(sign));
+    for (const d of bin.docks) out.push(...this.addDock(d));
     return out;
+  }
+
+  /**
+   * A bike-share dock (session 6f): the kiosk on its first tile (west or north end), a rack slot on each
+   * other tile, and a docked bike in the first slots, as many as it holds. Each sprite sorts by its own
+   * tile's foot y, like props.
+   */
+  private addDock(d: DockRect): Phaser.GameObjects.GameObject[] {
+    const s = this.scene;
+    const T = TILE_SIZE;
+    const across = d.width > d.height;
+    const tile = (n: number) => ({ x: d.x + (across ? n * T : 0) + T / 2, y: d.y + (across ? 0 : n * T) + T });
+    const out: Phaser.GameObjects.GameObject[] = [];
+    const k = tile(0);
+    out.push(s.add.image(k.x, k.y, PROPS_TEXTURE, PROP_NAMES.indexOf('dock-kiosk')).setOrigin(0.5, 1).setDepth(k.y));
+    for (let n = 1; n <= d.slots; n++) {
+      const p = tile(n);
+      out.push(s.add.image(p.x, p.y, PROPS_TEXTURE, PROP_NAMES.indexOf(across ? 'dock-rack-h' : 'dock-rack-v')).setOrigin(0.5, 1).setDepth(p.y));
+    }
+    const bikes: Phaser.GameObjects.Image[] = [];
+    for (let n = 1; n <= d.slots; n++) {
+      const p = tile(n);
+      bikes.push(s.add.image(p.x, p.y, PROPS_TEXTURE, PROP_NAMES.indexOf(across ? 'bike-h' : 'bike-v')).setOrigin(0.5, 1).setDepth(p.y + 0.01));
+    }
+    this.dockBikes.set(d.dockId, bikes);
+    this.refreshDock(d.dockId);
+    return [...out, ...bikes];
+  }
+
+  /** Shows as many docked bikes as the dock holds now (call after renting or returning one). */
+  refreshDock(dockId: string): void {
+    const bikes = this.dockBikes.get(dockId);
+    if (!bikes) return;
+    const n = this.bikesAt(dockId);
+    bikes.forEach((b, i) => b.setVisible(i < n));
+  }
+
+  /** How many docked bikes are drawn at a dock (null when its bin isn't built). The browser checks read it. */
+  bikesShown(dockId: string): number | null {
+    const bikes = this.dockBikes.get(dockId);
+    return bikes ? bikes.filter((b) => b.visible).length : null;
   }
 
   /**
@@ -240,6 +289,7 @@ export class WorldView {
   destroy(): void {
     for (const objs of this.live.values()) for (const o of objs) o.destroy();
     this.live.clear();
+    this.dockBikes.clear();
     this.map.destroy();
   }
 }

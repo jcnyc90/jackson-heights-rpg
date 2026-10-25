@@ -2,14 +2,15 @@ import Phaser from 'phaser';
 import tileIds from '../data/tiles.json';
 import { DIRECTIONS_8, RADAR, TILE_SIZE, type Direction8 } from '../config';
 import type { WorldData } from './mapLoader';
-import type { Rect } from './maps';
+import type { DockRect, Rect } from './maps';
 
 // Circular radar (session 6e, owner's decision 8): top-left, north up, centred on the player, about
 // two blocks of radius. White roads, dark blocks, green parks and paseo, warm plazas; the walkable
 // area's edge as a hard line. Player arrow (direction of travel), target blip, clamped to the rim
 // when the target is off the radar. Redrawn into a small canvas texture only when something changes.
 
-const COLOURS = { block: '#2a1f3d', road: '#fffaf0', green: '#7dd3a0', plaza: '#f3dfb6', outside: '#1b1528', outsideRoad: '#86849f', edge: '#ff5d5d', ring: '#fffaf0', player: '#ff6f61', target: '#ffd46e', outline: '#2a1f3d' } as const;
+// Session 6f: bike-share docks as lavender marks (Claude's choice: a colour no other radar feature uses).
+const COLOURS = { block: '#2a1f3d', road: '#fffaf0', green: '#7dd3a0', plaza: '#f3dfb6', outside: '#1b1528', outsideRoad: '#86849f', edge: '#ff5d5d', ring: '#fffaf0', player: '#ff6f61', target: '#ffd46e', outline: '#2a1f3d', dock: '#c7a6e6' } as const;
 const ROAD = /^(road|sidewalk|curb-|center-line-|lane-dash-|crosswalk-|el-shadow|manhole)/;
 const GREEN = new Set(['lawn', 'lawn-dark', 'paseo-grass', 'bike-lane', 'playground', 'park-path', 'flowers']);
 const KEY = 'radar';
@@ -42,10 +43,10 @@ export class Radar {
   private readonly tex: Phaser.Textures.CanvasTexture;
   private last = '';
 
-  constructor(scene: Phaser.Scene, world: WorldData, walk: Rect, x: number, y: number, depth: number) {
+  constructor(scene: Phaser.Scene, world: WorldData, walk: Rect, x: number, y: number, depth: number, docks: readonly DockRect[] = []) {
     const R = RADAR.radius;
     this.size = 2 * R + 3;
-    this.overview = buildOverview(world, walk);
+    this.overview = buildOverview(world, walk, docks);
     this.mask = document.createElement('canvas');
     this.mask.width = this.mask.height = this.size;
     const m = this.mask.getContext('2d')!;
@@ -127,8 +128,11 @@ function pixels(ctx: CanvasRenderingContext2D, ox: number, oy: number, rows: str
   }));
 }
 
-/** One pixel per RADAR.tilesPerPixel tiles square: road beats plaza beats green beats block; outside the walkable area dimmed, its edge a red line. */
-function buildOverview(world: WorldData, walk: Rect): HTMLCanvasElement {
+/**
+ * One pixel per RADAR.tilesPerPixel tiles square: road beats plaza beats green beats block; outside the walkable area
+ * dimmed, its edge a red line; bike-share docks (6f) as a 2 x 2 lavender mark over the dock's middle.
+ */
+function buildOverview(world: WorldData, walk: Rect, docks: readonly DockRect[]): HTMLCanvasElement {
   const n = RADAR.tilesPerPixel;
   const W = Math.ceil(world.width / n);
   const H = Math.ceil(world.height / n);
@@ -160,5 +164,8 @@ function buildOverview(world: WorldData, walk: Rect): HTMLCanvasElement {
   ctx.fillRect(ex0, ey1, ex1 - ex0 + 1, 1);
   ctx.fillRect(ex0, ey0, 1, ey1 - ey0 + 1);
   ctx.fillRect(ex1, ey0, 1, ey1 - ey0 + 1);
+  ctx.fillStyle = COLOURS.dock;
+  const per = n * TILE_SIZE;
+  for (const d of docks) ctx.fillRect(Math.round((d.x + d.width / 2) / per) - 1, Math.round((d.y + d.height / 2) / per) - 1, 2, 2);
   return cv;
 }

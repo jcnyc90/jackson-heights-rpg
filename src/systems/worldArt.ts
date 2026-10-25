@@ -1,6 +1,6 @@
 import type Phaser from 'phaser';
-import { TILE_SIZE } from '../config';
-import { C, PILLAR, PLANTER, SIGNAL, pixelMap, rect, type Ctx } from './placeholderArt';
+import { DIRECTIONS, RIDER_FRAME, TEXTURES, TILE_SIZE, type Direction } from '../config';
+import { C, PILLAR, PLANTER, SIGNAL, drawPlayerFigure, pixelMap, rect, type Ctx } from './placeholderArt';
 import type { WorldBuilding } from './mapLoader';
 
 // Placeholder art for the world map (session 6e): street furniture sprites and hybrid oblique
@@ -9,7 +9,11 @@ import type { WorldBuilding } from './mapLoader';
 
 /** Prop sprites, one 32x48 frame each, foot at the bottom centre; frame order = the "p-" tile names. */
 export const PROP_FRAME = { width: 32, height: 48 } as const;
-export const PROP_NAMES = ['p-tree', 'p-bush', 'p-lamp', 'p-hydrant', 'p-trash', 'p-bench', 'p-signal', 'p-barricade', 'p-pillar', 'p-stairs', 'p-planter', 'signpost'] as const;
+// Session 6f appends the bike-share frames (drawn per dock tile from the map's "docks" layer, not from markers):
+// the kiosk, a rack slot of a dock along an east-west curb (bikes seen end-on) or a north-south one (side-on),
+// and a docked bike for each. Generic branding (owner's decision 2): original colours from the palette, a
+// dark-green kiosk with a yellow band and yellow bikes; no real system's name, logo or colours.
+export const PROP_NAMES = ['p-tree', 'p-bush', 'p-lamp', 'p-hydrant', 'p-trash', 'p-bench', 'p-signal', 'p-barricade', 'p-pillar', 'p-stairs', 'p-planter', 'signpost', 'dock-kiosk', 'dock-rack-h', 'dock-rack-v', 'bike-h', 'bike-v'] as const;
 export const PROPS_TEXTURE = 'props';
 
 function disc(ctx: Ctx, cx: number, cy: number, rx: number, ry: number, fill: string, outline: string): void {
@@ -96,7 +100,153 @@ const PROP_PAINTERS: Record<(typeof PROP_NAMES)[number], (ctx: Ctx) => void> = {
     rect(ctx, C.steelLight, 15, 6, 2, 40);
     rect(ctx, C.outline, 12, 44, 8, 3);
   },
+  'dock-kiosk': (ctx) => {
+    rect(ctx, C.outline, 9, 17, 14, 31);
+    rect(ctx, C.signPlate, 10, 18, 12, 28);
+    rect(ctx, C.marking, 10, 18, 12, 3);
+    rect(ctx, C.outline, 12, 24, 8, 7);
+    rect(ctx, C.glass, 13, 25, 6, 5);
+    rect(ctx, C.white, 13, 25, 2, 1);
+    rect(ctx, C.outline, 14, 34, 4, 2);
+    rect(ctx, C.leafDark, 10, 39, 12, 1);
+    rect(ctx, C.slateDark, 9, 46, 14, 2);
+  },
+  'dock-rack-h': (ctx) => {
+    rect(ctx, C.outline, 7, 43, 18, 4);
+    rect(ctx, C.slateDark, 8, 44, 16, 2);
+    rect(ctx, C.outline, 14, 35, 4, 9);
+    rect(ctx, C.slate, 15, 36, 2, 7);
+    rect(ctx, C.marking, 15, 36, 2, 1);
+  },
+  'dock-rack-v': (ctx) => {
+    rect(ctx, C.outline, 13, 32, 6, 16);
+    rect(ctx, C.slateDark, 14, 33, 4, 14);
+    rect(ctx, C.outline, 12, 38, 8, 5);
+    rect(ctx, C.slate, 13, 39, 6, 3);
+    rect(ctx, C.marking, 15, 39, 2, 1);
+  },
+  'bike-h': (ctx) => {
+    // End-on (the bike points north-south): handlebar, a yellow front basket, the front tyre.
+    rect(ctx, C.outline, 9, 29, 14, 4);
+    rect(ctx, C.slate, 10, 30, 12, 2);
+    rect(ctx, C.outline, 15, 32, 2, 3);
+    rect(ctx, C.outline, 11, 34, 10, 7);
+    rect(ctx, C.marking, 12, 35, 8, 5);
+    rect(ctx, C.bag, 12, 37, 8, 1);
+    rect(ctx, C.outline, 14, 40, 4, 8);
+    rect(ctx, C.slateDark, 15, 41, 2, 6);
+  },
+  'bike-v': (ctx) => bikeSide(ctx, 16, 47),
 };
+
+/** A 1 px line from (x0, y0) to (x1, y1), whole pixels (Bresenham). */
+function line(ctx: Ctx, color: string, x0: number, y0: number, x1: number, y1: number): void {
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    rect(ctx, color, x0, y0);
+    if (x0 === x1 && y0 === y1) return;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+}
+
+/**
+ * A bike seen side-on, facing right, its wheels on the ground at y = `foot`, centred on x = `cx` (session 6f: docked
+ * bikes, and the rider's bike facing left or right). Yellow frame, dark tyres; mirror it for facing left.
+ */
+export function bikeSide(ctx: Ctx, cx: number, foot: number): void {
+  const [rx, fx, hy] = [cx - 8, cx + 8, foot - 4];
+  for (const x of [rx, fx]) {
+    disc(ctx, x, hy, 3, 3, C.slateDark, C.outline);
+    rect(ctx, C.stone, x, hy);
+  }
+  const seat = [cx - 3, foot - 10], head = [cx + 5, foot - 10], crank = [cx, hy];
+  for (const [color, o] of [[C.outline, 1], [C.marking, 0]] as const) {
+    line(ctx, color, seat[0], seat[1] + o, head[0], head[1] + o);
+    line(ctx, color, head[0], head[1] + o, crank[0], crank[1] + o);
+    line(ctx, color, seat[0], seat[1] + o, crank[0], crank[1] + o);
+    line(ctx, color, crank[0], crank[1] + o, rx, hy + o);
+    line(ctx, color, seat[0], seat[1] + o, rx, hy + o);
+    line(ctx, color, head[0], head[1] + o, fx, hy + o);
+  }
+  rect(ctx, C.outline, seat[0] - 2, seat[1] - 2, 5, 2);
+  rect(ctx, C.outline, head[0] - 1, head[1] - 3, 2, 3);
+  rect(ctx, C.outline, head[0] - 1, head[1] - 4, 4, 2);
+  rect(ctx, C.outline, crank[0] - 1, crank[1] - 1, 3, 3);
+}
+
+/**
+ * The rider sheet (session 6f, TEXTURES.rider, RIDER_FRAME): the player's upper body on a bike, per direction a
+ * coasting frame and two pedalling frames. Side views are drawn facing right and mirrored for left. Original
+ * placeholder art; the bike is the docked bike's design.
+ */
+export function generateRiderTexture(scene: Phaser.Scene): void {
+  if (scene.textures.exists(TEXTURES.rider)) return;
+  const { width: fw, height: fh, columns } = RIDER_FRAME;
+  const tex = scene.textures.createCanvas(TEXTURES.rider, fw * columns, fh * DIRECTIONS.length);
+  if (!tex) throw new Error('Could not create the rider texture');
+  const ctx = tex.getContext();
+  const body = document.createElement('canvas');
+  body.width = 16;
+  body.height = 24;
+  const bctx = body.getContext('2d')!;
+  DIRECTIONS.forEach((dir, row) => {
+    for (let col = 0; col < columns; col++) {
+      bctx.clearRect(0, 0, 16, 24);
+      drawPlayerFigure(bctx, 0, 0, dir === 'left' ? 'right' : dir, 0);
+      ctx.save();
+      ctx.translate(col * fw, row * fh);
+      ctx.imageSmoothingEnabled = false;
+      paintRider(ctx, body, dir, [0, 1, -1][col]);
+      ctx.restore();
+      tex.add(row * columns + col, 0, col * fw, row * fh, fw, fh);
+    }
+  });
+  tex.refresh();
+}
+
+/** One rider frame at the origin (RIDER_FRAME, wheels on the bottom row); `pedal` -1, 0 or 1. Only the top 20 rows of the figure (no legs). */
+function paintRider(ctx: Ctx, body: HTMLCanvasElement, dir: Direction, pedal: number): void {
+  const fw = RIDER_FRAME.width;
+  const foot = RIDER_FRAME.height - 1;
+  if (dir === 'left' || dir === 'right') {
+    if (dir === 'left') {
+      ctx.translate(fw, 0);
+      ctx.scale(-1, 1);
+    }
+    bikeSide(ctx, 12, foot);
+    ctx.drawImage(body, 0, 0, 16, 20, 2, foot - 29, 16, 20);
+    // The near leg, from the seat to the pedal.
+    rect(ctx, C.outline, 9, foot - 11, 6, 4);
+    rect(ctx, C.pants, 10, foot - 10, 4, 2);
+    rect(ctx, C.outline, 12 + pedal, foot - 8, 4, 5 - pedal);
+    rect(ctx, C.pants, 13 + pedal, foot - 8, 2, 4 - pedal);
+    return;
+  }
+  const [lift, liftR] = [pedal > 0 ? 1 : 0, pedal < 0 ? 1 : 0];
+  for (const [x, l] of [[6, lift], [16, liftR]]) {
+    rect(ctx, C.outline, x - 1, foot - 9 - l, 4, 6);
+    rect(ctx, C.pants, x, foot - 8 - l, 2, 4);
+  }
+  if (dir === 'down') {
+    // Facing the viewer: the body behind the handlebar, the basket and the front tyre.
+    ctx.drawImage(body, 0, 0, 16, 20, 4, foot - 27, 16, 20);
+    rect(ctx, C.outline, 3, foot - 12, 18, 3);
+    rect(ctx, C.slate, 4, foot - 11, 16, 1);
+    rect(ctx, C.outline, 7, foot - 9, 10, 6);
+    rect(ctx, C.marking, 8, foot - 8, 8, 4);
+    rect(ctx, C.bag, 8, foot - 6, 8, 1);
+  } else {
+    // From behind: the body, then the rear rack (nearer the viewer) and the rear tyre.
+    ctx.drawImage(body, 0, 0, 16, 20, 4, foot - 28, 16, 20);
+    rect(ctx, C.outline, 7, foot - 10, 10, 4);
+    rect(ctx, C.marking, 8, foot - 9, 8, 2);
+  }
+  rect(ctx, C.outline, 10, foot - 4, 4, 5);
+  rect(ctx, C.slateDark, 11, foot - 3, 2, 3);
+}
 
 /** Paints the prop sheet (texture PROPS_TEXTURE, one numbered frame per PROP_NAMES entry). */
 export function generatePropTextures(scene: Phaser.Scene): void {

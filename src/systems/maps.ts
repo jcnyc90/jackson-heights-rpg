@@ -73,6 +73,20 @@ export interface ZoneRect {
   height: number;
 }
 
+/**
+ * A bike-share dock (layer "docks", session 6f): a kiosk at the west (or north) end and `slots` bike slots in a
+ * row, x/y/width/height in map pixels. `open` is the side the dock is used from (n, s, w or e: the sidewalk).
+ */
+export interface DockRect {
+  dockId: string;
+  open: 'n' | 's' | 'w' | 'e';
+  slots: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** A rectangle in map pixels. */
 export interface Rect {
   x: number;
@@ -95,6 +109,8 @@ export interface MapInfo {
   signs: StreetSign[];
   corners: CornerRect[];
   zones: ZoneRect[];
+  /** Bike-share docks (layer "docks"); empty on maps without them. */
+  docks: DockRect[];
   /** Where the player can walk, in map pixels (map properties walkX/Y/Width/Height, in tiles); the whole map if not set. */
   walk: Rect;
   /** External maps (the world map): the decoded tile layers and buildings, drawn by WorldView. */
@@ -185,7 +201,7 @@ export function readObjects(mapId: string, data: TiledMap) {
  * Reads the optional layers of a generated map: signs ("labels": points of class "streetSign" with
  * string properties street and cross, or "edgeSign" with text), crossings ("corners": rectangles
  * with street and cross), zone areas ("zones": rectangles of class "zone" with string property
- * zoneId), and the walkable area (int map properties walkX, walkY, walkWidth, walkHeight, in
+ * zoneId), bike-share docks ("docks": rectangles of class "dock" with dockId, open, slots), and the walkable area (int map properties walkX, walkY, walkWidth, walkHeight, in
  * tiles). Malformed entries throw, like objects.
  */
 export function readExtras(mapId: string, data: TiledMap) {
@@ -219,6 +235,17 @@ export function readExtras(mapId: string, data: TiledMap) {
     if (obj.type !== 'zone' || obj.point || width <= 0 || height <= 0) throw new Error(`${where}: must be a rectangle of class "zone"`);
     return { zoneId: str(where, props(obj), 'zoneId'), x: obj.x, y: obj.y, width, height };
   });
+  const docks: DockRect[] = objectsOf('docks').map((obj) => {
+    const where = `Map "${mapId}", dock ${obj.id} ("${obj.name ?? ''}")`;
+    const { width = 0, height = 0 } = obj;
+    if (obj.type !== 'dock' || obj.point || width <= 0 || height <= 0) throw new Error(`${where}: must be a rectangle of class "dock"`);
+    const p = props(obj);
+    const open = str(where, p, 'open');
+    const slots = p.get('slots');
+    if (!['n', 's', 'w', 'e'].includes(open)) throw new Error(`${where}: open must be n, s, w or e`);
+    if (!Number.isInteger(slots) || (slots as number) + 1 !== Math.max(width / tw, height / th)) throw new Error(`${where}: slots must be an int, one less than its length in tiles`);
+    return { dockId: str(where, p, 'dockId'), open: open as DockRect['open'], slots: slots as number, x: obj.x, y: obj.y, width, height };
+  });
   const mp = new Map((data.properties ?? []).map((p) => [p.name, p.value]));
   const keys = ['walkX', 'walkY', 'walkWidth', 'walkHeight'];
   const full: Rect = { x: 0, y: 0, width: (data.width ?? 0) * tw, height: (data.height ?? 0) * th };
@@ -228,7 +255,7 @@ export function readExtras(mapId: string, data: TiledMap) {
     if (![x, y, w, h].every((v) => Number.isInteger(v))) throw new Error(`Map "${mapId}": walkX, walkY, walkWidth and walkHeight must all be int properties`);
     walk = { x: (x as number) * tw, y: (y as number) * th, width: (w as number) * tw, height: (h as number) * th };
   }
-  return { signs, corners, zones, walk };
+  return { signs, corners, zones, docks, walk };
 }
 
 const MAPS = new Map<string, MapInfo>();

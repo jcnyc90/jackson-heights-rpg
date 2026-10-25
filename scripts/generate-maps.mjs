@@ -729,7 +729,7 @@ export function buildMaps(world, opts = {}) {
   // with the road on the same side, paseo grass beside a bike lane, or plaza beside a road or on its outer row. No cell may be in a
   // crossing box or a door's clear zone, the 1-tile ring around it may hold no crossing, signal, sign post,
   // barricade, stairs, pillar or other dock, and the row behind it (away from the road or lane) must be free: the
-  // sidewalk stays passable and the dock is usable from it. That row is reserved, so trees and furniture keep off it.
+  // sidewalk stays passable and the dock is usable from it. That row and the ring are reserved, so trees and furniture keep off them.
   const docks = [];
   const docksOut = [];
   const INWARD = { 'curb-s': [0, -1], 'curb-n': [0, 1], 'curb-w': [1, 0], 'curb-e': [-1, 0] };
@@ -781,6 +781,8 @@ export function buildMaps(world, opts = {}) {
       reserved[k] = 1;
       reserved[idx(i + ox, j + oy)] = 1;
     }
+    // Keep the ring clear of trees and furniture placed later too (a tree at the end would hide a bike).
+    for (let j = fp.y - 1; j <= fp.y + fp.h; j++) for (let i = fp.x - 1; i <= fp.x + fp.w; i++) if (inMap(i, j)) reserved[idx(i, j)] = 1;
     docks.push({ ...fp, station, open: ox < 0 ? 'w' : ox > 0 ? 'e' : oy < 0 ? 'n' : 's' });
   };
   if (opts.snapDocks) {

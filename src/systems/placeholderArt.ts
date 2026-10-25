@@ -513,6 +513,11 @@ interface Part {
   outline: boolean;
 }
 
+/** The player's figure (session 6f: the rider sheet reuses its upper body). */
+export function drawPlayerFigure(ctx: Ctx, ox: number, oy: number, dir: Direction, step: number): void {
+  drawPerson(ctx, ox, oy, dir, step, PLAYER_LOOK);
+}
+
 /** step: 0 = stand, 1 = left foot forward, 2 = right foot forward. */
 function drawPerson(ctx: Ctx, ox: number, oy: number, dir: Direction, step: number, look: Look): void {
   const parts: Part[] = [];
