@@ -42257,12 +42257,12 @@
          "columns":4,
          "firstgid":1,
          "image":"..\/tilesets\/tiles.png",
-         "imageheight":224,
+         "imageheight":240,
          "imagewidth":64,
          "margin":0,
          "name":"tiles",
          "spacing":0,
-         "tilecount":56,
+         "tilecount":60,
          "tileheight":16,
          "tiles":[
                 {

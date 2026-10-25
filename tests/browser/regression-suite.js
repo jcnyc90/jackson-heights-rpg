@@ -38,7 +38,7 @@ try {
   check('A7 world bounds = map', [s.physics.world.bounds.width, s.physics.world.bounds.height], [480, 320]);
   check('A8 colliding tiles', obstacles.layer.data.flat().filter((t) => t.collides).length, 194);
   check('A9 feet body size/offset', [s.player.body.width, s.player.body.height, s.player.body.offset.x, s.player.body.offset.y], [10, 8, 3, 16]);
-  check('A10 texture sizes tiles/player/emote (tiles: 56 since 6e)', [tex('tiles'), tex('player'), tex('emote')], [[64, 224], [48, 96], [10, 10]]);
+  check('A10 texture sizes tiles/player/emote (tiles: 56 since 6e, 57 since 6f: p-dock)', [tex('tiles'), tex('player'), tex('emote')], [[64, 240], [48, 96], [10, 10]]);
   check('A11 walk anims frames', ['down', 'left', 'right', 'up'].map((d) => { const a = g.anims.get(`player-walk-${d}`); return [a.frames.map((f) => f.frame.name), a.frameRate, a.repeat]; }),
     [[[1, 0, 2, 0], 8, -1], [[4, 3, 5, 3], 8, -1], [[7, 6, 8, 6], 8, -1], [[10, 9, 11, 9], 8, -1]]);
   check('A12 camera roundPixels + follows player', [s.cameras.main.roundPixels, s.cameras.main._follow === s.player], [true, true]);

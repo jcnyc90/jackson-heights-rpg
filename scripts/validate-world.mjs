@@ -38,7 +38,7 @@ export function validateWorld(data) {
   const err = (m) => errors.push(m);
 
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return { errors: ['dataset must be a JSON object'], warnings, unverified };
-  if (data.schemaVersion !== 5) err(`schemaVersion must be 5 (got ${JSON.stringify(data.schemaVersion)})`);
+  if (data.schemaVersion !== 6) err(`schemaVersion must be 6 (got ${JSON.stringify(data.schemaVersion)})`);
   if (typeof data.id !== 'string' || !ID.test(data.id)) err('id must be a kebab-case string');
 
   // Each collection: an array of objects with unique kebab-case ids. Returns id -> entry.
@@ -323,6 +323,44 @@ export function validateWorld(data) {
     if (!areas.has(dv.subject) && !segments.has(dv.subject)) err(`deviation "${dv.id}": subject must be an area or a segment`);
     for (const k of ['game', 'reality']) if (typeof dv[k] !== 'string' || dv[k] === '') err(`deviation "${dv.id}": needs ${k}`);
   }
+  // ---- schema 6 (session 6f): bike-share docks at real station positions, snapped to map tiles ----
+  const bd = data.bikeDocks;
+  if (bd === null || typeof bd !== 'object' || Array.isArray(bd)) err('bikeDocks: must be an object');
+  else {
+    cite('bikeDocks', bd.sources);
+    if (!/^https:\/\//.test(bd.feed ?? '')) err('bikeDocks.feed: must be the https url of the feed the positions came from');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bd.fetched ?? '')) err('bikeDocks.fetched: must be YYYY-MM-DD');
+    if (!Number.isInteger(bd.slots) || bd.slots < 1) err('bikeDocks.slots: must be a positive integer');
+    if (!Number.isInteger(bd.bikesAtStart) || bd.bikesAtStart < 0 || bd.bikesAtStart > bd.slots) err('bikeDocks.bikesAtStart: must be an integer from 0 to slots');
+    const list = Array.isArray(bd.docks) ? bd.docks : (err('bikeDocks.docks: must be an array'), []);
+    if (Array.isArray(bd.docks) && list.length === 0) err('bikeDocks.docks: needs at least one dock');
+    // Only these four fields per dock (no coordinates, addresses or anything else from the feed).
+    const FIELDS = ['station', 'label', 'tile', 'size'];
+    const walkBox = layoutOk && [...nodes.values()].every((n) => Array.isArray(n.grid)) ? mapBoxes(data.layout, [...nodes.values()]).walk : null;
+    const stations = new Set();
+    const taken = new Map();
+    list.forEach((d, i) => {
+      const where = `bikeDocks.docks[${i}]`;
+      if (d === null || typeof d !== 'object') return err(`${where}: must be an object`);
+      for (const k of Object.keys(d)) if (!FIELDS.includes(k)) err(`${where}: unexpected field "${k}" (a dock has only ${FIELDS.join(', ')})`);
+      if (typeof d.station !== 'string' || d.station === '') err(`${where}: station must be the feed's station_id`);
+      else if (stations.has(d.station)) err(`${where}: duplicate station "${d.station}"`);
+      stations.add(d.station);
+      if (typeof d.label !== 'string' || !/^\S.* & .*\S$/.test(d.label)) err(`${where}: label must be the station's corner label ("80 St & 37 Ave")`);
+      const okTile = Array.isArray(d.tile) && d.tile.length === 2 && d.tile.every(Number.isInteger);
+      if (!okTile) err(`${where}: tile must be [column, row] integers`);
+      const len = Number.isInteger(bd.slots) ? bd.slots + 1 : NaN;
+      const okFp = Array.isArray(d.size) && d.size.length === 2 && ((d.size[0] === len && d.size[1] === 1) || (d.size[0] === 1 && d.size[1] === len));
+      if (!okFp) err(`${where}: size (the footprint in tiles) must be [${len}, 1] or [1, ${len}] (a kiosk plus slots in a row)`);
+      if (!okTile || !okFp) return;
+      const [x, y] = d.tile, [fw, fh] = d.size;
+      if (walkBox && !(x >= walkBox.x0 && y >= walkBox.y0 && x + fw <= walkBox.x0 + walkBox.width && y + fh <= walkBox.y0 + walkBox.height)) err(`${where}: outside the walkable area`);
+      for (let j = y; j < y + fh; j++) for (let k = x; k < x + fw; k++) {
+        if (taken.has(`${k},${j}`)) err(`${where}: overlaps bikeDocks.docks[${taken.get(`${k},${j}`)}]`);
+        taken.set(`${k},${j}`, i);
+      }
+    });
+  }
   for (const p of privacyProblems(data)) err(p);
   for (const sid of sources.keys()) if (!cited.has(sid) && sources.get(sid).role !== 'licence') warnings.push(`source "${sid}" is cited by no fact`);
 
@@ -370,7 +408,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const stations = Array.isArray(data.transit) ? data.transit.filter((t) => t.kind === 'station').length : 0;
   const zoned = new Set((Array.isArray(data.zones) ? data.zones : []).flatMap((z) => z.segments ?? []));
   const continuing = Array.isArray(data.nodes) ? data.nodes.reduce((n, x) => n + (x.continues?.length ?? 0), 0) : 0;
-  console.log(`[world] ${file}: ${count('zones')} zones, ${count('maps')} map, ${count('streets')} streets, ${count('nodes')} nodes, ${count('segments')} segments (${zoned.size} in zones), ${continuing} street ends running past the bounds, ${stations} stations, ${count('areas')} areas, ${count('anchors')} anchors, ${count('landmarks')} landmarks, ${count('blockFaces')} block faces, ${count('parks')} parks, ${data.trees?.tiles?.length ?? 0} trees, ${count('bikeLanes')} bike-lane blocks, ${count('sources')} sources`);
+  console.log(`[world] ${file}: ${count('zones')} zones, ${count('maps')} map, ${count('streets')} streets, ${count('nodes')} nodes, ${count('segments')} segments (${zoned.size} in zones), ${continuing} street ends running past the bounds, ${stations} stations, ${count('areas')} areas, ${count('anchors')} anchors, ${count('landmarks')} landmarks, ${count('blockFaces')} block faces, ${count('parks')} parks, ${data.trees?.tiles?.length ?? 0} trees, ${count('bikeLanes')} bike-lane blocks, ${data.bikeDocks?.docks?.length ?? 0} bike docks, ${count('sources')} sources`);
   for (const w of warnings) console.log(`[world] warning: ${w}`);
   console.log(`[world] facts not both verified and high confidence: ${unverified.length}`);
   for (const u of unverified) console.log(`[world]   ${u}`);

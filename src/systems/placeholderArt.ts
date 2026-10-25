@@ -432,6 +432,7 @@ const TILE_PAINTERS: Record<string, Painter> = {
   'p-pillar': marker(C.steelLight),
   'p-stairs': marker(C.station),
   'p-planter': marker(C.planter),
+  'p-dock': marker(C.marking),
   playground: (ctx, x, y) => {
     rect(ctx, C.awning, x, y, 16, 16);
     for (const [px, py] of [[2, 3], [9, 7], [5, 12], [13, 13]]) rect(ctx, C.brick, x + px, y + py, 2, 2);

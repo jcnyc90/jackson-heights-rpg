@@ -59,7 +59,15 @@ export const SHOP_WORDS = ['bakery', 'grocery', 'pharmacy', 'laundry', 'deli', '
 const EN_STRINGS = JSON.parse(readFileSync(join(ROOT, 'src/data/strings/en.json'), 'utf8'));
 const EN_LENGTHS = Object.fromEntries(SHOP_WORDS.map((w) => [w, [...EN_STRINGS[`shop.${w}`]].length]));
 // Props that block movement (owner's decision 12: trees, posts and trash cans; Claude's choice for the rest).
-const SOLID_PROPS = new Set(['p-tree', 'p-bush', 'p-lamp', 'p-hydrant', 'p-trash', 'p-bench', 'p-signal', 'p-barricade', 'p-pillar', 'p-stairs', 'p-planter']);
+const SOLID_PROPS = new Set(['p-tree', 'p-bush', 'p-lamp', 'p-hydrant', 'p-trash', 'p-bench', 'p-signal', 'p-barricade', 'p-pillar', 'p-stairs', 'p-planter', 'p-dock']);
+// Session 6f feature flags (src/data/features.json): bikeDocks puts the dataset's bike-share docks on the map.
+export const FEATURES = JSON.parse(readFileSync(join(ROOT, 'src/data/features.json'), 'utf8'));
+// A bike-share dock (Claude's choice): a kiosk and DOCK_SLOTS bike slots in a row, DOCK_LEN x 1 tiles, along
+// a curb, along the paseo's bike lane, or along a plaza's road edge. DOCK_SNAP_RADIUS: how far (tiles) from a
+// station's own position its footprint may be snapped along its block face.
+export const DOCK_SLOTS = 4;
+export const DOCK_LEN = DOCK_SLOTS + 1;
+const DOCK_SNAP_RADIUS = 45;
 
 /** Deterministic integer hash of a few integers (layout variety without randomness). */
 export function hash(...v) {
@@ -93,7 +101,10 @@ export function decodeLayer(b64) {
 /**
  * Builds the dataset's one map. Returns [{ id, json, layers }], where json is a Tiled JSON map (not
  * yet normalized by Tiled) and layers holds the plain gid arrays of its tile layers. Throws on
- * anything it can't lay out.
+ * anything it can't lay out. Options: lenient (collect problems instead of throwing), docks (place the
+ * dataset's bike docks; default FEATURES.bikeDocks), snapDocks (session 6f's snapping step: dock
+ * candidates { station, label, tile (layout tiles, unrounded), segment, side } to snap and place instead
+ * of the dataset's docks; the result's `docks` lists where each went, or why it couldn't).
  */
 export function buildMaps(world, opts = {}) {
   const problems = [];
@@ -713,6 +724,112 @@ export function buildMaps(world, opts = {}) {
     objects.unshift({ name: 'start', type: 'spawn', point: true, x: fx, y: fy, properties: [prop('facing', START.facing), prop('spawnId', 'start')] });
   }
 
+  // ---- bike-share docks (session 6f: owner's decisions 1-3; the footprint and these rules are Claude's choice) ----
+  // A footprint (DOCK_LEN x 1 tiles) is legal when every cell is free, walkable and of one edge kind: curb tiles
+  // with the road on the same side, paseo grass beside a bike lane, or plaza beside a road or on its outer row. No cell may be in a
+  // crossing box or a door's clear zone, the 1-tile ring around it may hold no crossing, signal, sign post,
+  // barricade, stairs, pillar or other dock, and the row behind it (away from the road or lane) must be free: the
+  // sidewalk stays passable and the dock is usable from it. That row is reserved, so trees and furniture keep off it.
+  const docks = [];
+  const docksOut = [];
+  const INWARD = { 'curb-s': [0, -1], 'curb-n': [0, 1], 'curb-w': [1, 0], 'curb-e': [-1, 0] };
+  /** [edge kind, inward dx, dy] of a cell a dock may stand on, or null. */
+  const dockEdge = (i, j) => {
+    if (!inMap(i, j)) return null;
+    const k = idx(i, j);
+    const name = TILE_IDS.tiles[ground[k] - 1];
+    if (cls[k] === SIDEWALK && INWARD[name]) return [name, ...INWARD[name]];
+    if (name === 'paseo-grass') for (const dy of [-1, 1]) if (inMap(i, j + dy) && ground[idx(i, j + dy)] === GID['bike-lane']) return [`lane${dy}`, 0, -dy];
+    if (name === 'plaza') {
+      const n4 = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+      for (const [dx, dy] of n4) if (isRoad(i + dx, j + dy)) return [`road${dx},${dy}`, -dx, -dy];
+      // A plaza's outer row: the plaza ends on this side (a park, a lot or a building), and goes on on the other.
+      for (const [dx, dy] of n4) if (inMap(i + dx, j + dy) && cls[idx(i + dx, j + dy)] !== PLAZA && inMap(i - dx, j - dy) && cls[idx(i - dx, j - dy)] === PLAZA) return [`plaza${dx},${dy}`, -dx, -dy];
+    }
+    return null;
+  };
+  const NEAR_DOCK = new Set(['p-signal', 'p-barricade', 'p-stairs', 'p-pillar', 'p-dock'].map((n) => GID[n]));
+  const cellsOf = (fp) => { const out = []; for (let j = fp.y; j < fp.y + fp.h; j++) for (let i = fp.x; i < fp.x + fp.w; i++) out.push([i, j]); return out; };
+  /** Why a footprint { x, y, w, h } (map tiles) can't take a dock, or null when it can. */
+  const dockProblem = (fp) => {
+    const cells = cellsOf(fp);
+    const e = dockEdge(...cells[0]);
+    if (!e) return 'not a curb, paseo-lane or plaza-edge tile';
+    const [kind, ox, oy] = e;
+    if ((fp.w > 1 && oy === 0) || (fp.h > 1 && ox === 0)) return 'the footprint runs across its edge, not along it';
+    for (const [i, j] of cells) {
+      const k = idx(i, j);
+      if (!inWalk(i, j) || dockEdge(i, j)?.[0] !== kind) return `tile ${i},${j} is not on the same edge`;
+      if (solid[k] || props[k] || reserved[k] || crossing[k]) return `tile ${i},${j} is taken (solid, a prop, reserved, or a crossing or door zone)`;
+      const [bi, bj] = [i + ox, j + oy];
+      if (!inWalk(bi, bj) || !walkableCls(bi, bj) || solid[idx(bi, bj)] || props[idx(bi, bj)] || crossing[idx(bi, bj)]) return `the tile behind ${i},${j} is not free`;
+    }
+    for (let j = fp.y - 1; j <= fp.y + fp.h; j++) for (let i = fp.x - 1; i <= fp.x + fp.w; i++) {
+      if (!inMap(i, j)) continue;
+      const k = idx(i, j);
+      if (crossing[k]) return `too close to a crossing or door at ${i},${j}`;
+      if (NEAR_DOCK.has(props[k]) || (solid[k] && !props[k] && isCorridor(i, j))) return `too close to a post, barricade, stairs or another dock at ${i},${j}`;
+    }
+    return null;
+  };
+  const placeDock = (fp, station) => {
+    const [, ox, oy] = dockEdge(fp.x, fp.y);
+    for (const [i, j] of cellsOf(fp)) {
+      const k = idx(i, j);
+      props[k] = GID['p-dock'];
+      solid[k] = 1;
+      reserved[k] = 1;
+      reserved[idx(i + ox, j + oy)] = 1;
+    }
+    docks.push({ ...fp, station, open: ox < 0 ? 'w' : ox > 0 ? 'e' : oy < 0 ? 'n' : 's' });
+  };
+  if (opts.snapDocks) {
+    // The snapping step (tools/snap_6f_docks.mjs): each station goes to the legal footprint nearest its own
+    // position whose tiles all lie on its own block face (the corridor of its segment, on its side).
+    for (const c of opts.snapDocks) {
+      const geo = segGeo.get(c.segment);
+      if (!geo) { docksOut.push({ ...c, dropped: `segment "${c.segment}" is not on the map` }); continue; }
+      const gi = geos.indexOf(geo);
+      const sideOf = (i, j) => {
+        if (geo.ns) return i + 0.5 < geo.ax ? 'west' : 'east';
+        const ly = geo.ay + ((geo.by - geo.ay) * (i + 0.5 - geo.ax)) / (geo.bx - geo.ax);
+        return j + 0.5 < ly ? 'north' : 'south';
+      };
+      // Between the segment's two end nodes (its own block, not past either crossing).
+      const between = (i, j) => {
+        const [vx, vy] = [geo.bx - geo.ax, geo.by - geo.ay];
+        const t = ((i + 0.5 - geo.ax) * vx + (j + 0.5 - geo.ay) * vy) / (vx * vx + vy * vy);
+        return t >= 0 && t <= 1;
+      };
+      const onFace = (fp) => cellsOf(fp).every(([i, j]) => inMap(i, j) && owner[idx(i, j)] === gi && sideOf(i, j) === c.side && between(i, j));
+      const [cx, cy] = [c.tile[0] - box.x0, c.tile[1] - box.y0];
+      let best = null;
+      for (let j = Math.floor(cy) - DOCK_SNAP_RADIUS; j <= Math.ceil(cy) + DOCK_SNAP_RADIUS; j++) for (let i = Math.floor(cx) - DOCK_SNAP_RADIUS; i <= Math.ceil(cx) + DOCK_SNAP_RADIUS; i++) {
+        for (const [w, h] of [[DOCK_LEN, 1], [1, DOCK_LEN]]) {
+          const fp = { x: i, y: j, w, h };
+          const d = Math.hypot(i + w / 2 - cx, j + h / 2 - cy);
+          if (d > DOCK_SNAP_RADIUS || (best && d >= best.d) || !onFace(fp) || dockProblem(fp)) continue;
+          best = { fp, d };
+        }
+      }
+      if (!best) { docksOut.push({ ...c, dropped: `no legal footprint on its block face within ${DOCK_SNAP_RADIUS} tiles` }); continue; }
+      placeDock(best.fp, c.station);
+      docksOut.push({ ...c, snapped: { tile: [best.fp.x + box.x0, best.fp.y + box.y0], footprint: [best.fp.w, best.fp.h], movedTiles: Math.round(best.d * 10) / 10 } });
+    }
+  } else if (opts.docks ?? FEATURES.bikeDocks) {
+    for (const d of world.bikeDocks?.docks ?? []) {
+      const fp = { x: d.tile[0] - box.x0, y: d.tile[1] - box.y0, w: d.size[0], h: d.size[1] };
+      const why = dockProblem(fp);
+      if (why) {
+        const msg = `bike dock at station "${d.station}": ${why}`;
+        if (!opts.lenient) throw new Error(msg);
+        problems.push(msg);
+        continue;
+      }
+      placeDock(fp, d.station);
+    }
+  }
+
   // ---- street trees (2015 census, snapped to the nearest free curb, paseo or plaza edge cell) ----
   const treeOk = (i, j) => {
     if (!inMap(i, j) || reserved[idx(i, j)] || crossing[idx(i, j)] || solid[idx(i, j)] || props[idx(i, j)]) return false;
@@ -800,6 +917,9 @@ export function buildMaps(world, opts = {}) {
   const signLayer = withIds([...signs, ...edgeSigns]);
   const cornerLayer = withIds(corners);
   const zoneLayer = withIds(zoneRects);
+  // Session 6f: one rectangle per dock (class "dock"), only when docks are on (the map is unchanged without them).
+  const docksOn = !!opts.snapDocks || (opts.docks ?? FEATURES.bikeDocks);
+  const dockLayer = withIds(docks.map((d, n) => ({ name: `dock-${n + 1}`, type: 'dock', x: d.x * T, y: d.y * T, width: d.w * T, height: d.h * T, properties: [prop('dockId', `dock-${n + 1}`), prop('open', d.open), prop('slots', DOCK_SLOTS, 'int')] })));
   const collision = Array.from(solid, (v) => (v ? GID.solid : 0));
   const tileLayer = (lid, name, data, visible = true) => ({ compression: 'zlib', data: encodeLayer(data), encoding: 'base64', height: H, id: lid, name, opacity: 1, type: 'tilelayer', visible, width: W, x: 0, y: 0 });
   const objectGroup = (lid, name, objs) => ({ draworder: 'topdown', id: lid, name, objects: objs, opacity: 1, type: 'objectgroup', visible: true, x: 0, y: 0 });
@@ -808,16 +928,17 @@ export function buildMaps(world, opts = {}) {
     layers: [
       tileLayer(1, 'ground', ground), tileLayer(2, 'collision', collision, false), tileLayer(3, 'props', props),
       objectGroup(4, 'objects', objLayer), objectGroup(5, 'npcs', npcLayer), objectGroup(6, 'buildings', bLayer), objectGroup(7, 'labels', signLayer), objectGroup(8, 'corners', cornerLayer), objectGroup(9, 'zones', zoneLayer),
+      ...(docksOn ? [objectGroup(10, 'docks', dockLayer)] : []),
     ],
-    nextlayerid: 10, nextobjectid: id, orientation: 'orthogonal',
+    nextlayerid: docksOn ? 11 : 10, nextobjectid: id, orientation: 'orthogonal',
     properties: [
       prop('generatedBy', 'scripts/generate-maps.mjs from src/data/world/jackson-heights.json; regenerate, do not edit by hand'),
       prop('walkHeight', walk.height, 'int'), prop('walkWidth', walk.width, 'int'), prop('walkX', WALK.x0, 'int'), prop('walkY', WALK.y0, 'int'),
     ],
     renderorder: 'right-down', tiledversion: '1.12.2', tileheight: T, tilesets: TILESETS, tilewidth: T, type: 'map', version: '1.10', width: W,
   };
-  const stats = { buildings: buildings.length, kinds: count(buildings.map((b) => b.kind)), trees: treesPlaced, treesInData: world.trees.tiles.length, signs: signs.length, edgeSigns: edgeSigns.length, corners: corners.length, rects: rects.length };
-  return [{ id: mapDef.id, json, layers: { ground, collision, props }, stats, problems, debug: { cls, owner, geos, box } }];
+  const stats = { buildings: buildings.length, kinds: count(buildings.map((b) => b.kind)), trees: treesPlaced, treesInData: world.trees.tiles.length, signs: signs.length, edgeSigns: edgeSigns.length, corners: corners.length, rects: rects.length, docks: docks.length };
+  return [{ id: mapDef.id, json, layers: { ground, collision, props }, stats, problems, docks: docksOut, debug: { cls, owner, geos, box } }];
 }
 
 function count(list) {

@@ -33,7 +33,7 @@ ap.add_argument('--world', default='src/data/world/jackson-heights.json')
 args = ap.parse_args()
 
 w = json.load(open(args.world))
-assert w['schemaVersion'] in (4, 5), w['schemaVersion']
+assert w['schemaVersion'] in (4, 5, 6), w['schemaVersion']  # 6: session 6f's bikeDocks (kept as they are)
 
 # ---- local metres, rotated into the grid frame (numbered streets run grid-north) ----
 LAT0 = 40.75
@@ -233,7 +233,7 @@ for s in segs:
     bike.append({'segment': s['id'], 'dataFromTo': ft, 'dataToFrom': tf, 'drawn': 'green-lane-both-sides', 'deviation': not (lane(ft) and lane(tf))})
 
 # ---- write ----
-w['schemaVersion'] = 5
+w['schemaVersion'] = max(5, w['schemaVersion'])
 dates = {'accessed': '2026-10-23', 'access': 'read', 'terms': 'NYC Open Data (no restrictions).'}
 new_sources = [
     {'id': 'dcp-pluto', 'title': 'Primary Land Use Tax Lot Output (PLUTO) (NYC Open Data 64uk-42ks)', 'version': '26v2 (rows updated 2026-08-24)', 'url': 'https://data.cityofnewyork.us/d/64uk-42ks',
@@ -265,7 +265,7 @@ w['deviations'] = [
     {'id': 'dev-paseo-bike-lanes', 'subject': 'area-34th-avenue-plaza', 'game': 'A green painted bike lane along both sides of every block, 73rd to 90th St (owner\'s decision 9).',
      'reality': 'DOT Bike Routes list a current facility on every block (protected, conventional or shared, per direction); blocks marked deviation in bikeLanes have no dedicated lane in both directions in the data.'},
 ]
-order = ['schemaVersion', 'id', 'bounds', 'layout', 'sources', 'streets', 'nodes', 'segments', 'transit', 'areas', 'zones', 'maps', 'anchors', 'landmarks', 'blockFaces', 'parks', 'trees', 'bikeLanes', 'deviations']
+order = ['schemaVersion', 'id', 'bounds', 'layout', 'sources', 'streets', 'nodes', 'segments', 'transit', 'areas', 'zones', 'maps', 'anchors', 'landmarks', 'blockFaces', 'parks', 'trees', 'bikeLanes', 'deviations'] + (['bikeDocks'] if 'bikeDocks' in w else [])
 assert set(order) == set(w), set(w) ^ set(order)
 def dump(v): return json.dumps(v, ensure_ascii=False)
 out = ['{']
@@ -275,6 +275,8 @@ for i, k in enumerate(order):
         body = '[\n' + ',\n'.join('    ' + dump(e) for e in v) + '\n  ]'
     elif k == 'trees':
         body = '{\n' + ',\n'.join(f'    {dump(a)}: {dump(b)}' for a, b in v.items()) + '\n  }'
+    elif k == 'bikeDocks':  # session 6f (tools/derive_6f_docks.py): one dock per line
+        body = '{\n' + ',\n'.join(f'    {dump(a)}: ' + ('[\n' + ',\n'.join('      ' + dump(e) for e in b) + '\n    ]' if a == 'docks' else dump(b)) for a, b in v.items()) + '\n  }'
     elif isinstance(v, dict):
         body = json.dumps(v, indent=2, ensure_ascii=False).replace('\n', '\n  ')
     else:
