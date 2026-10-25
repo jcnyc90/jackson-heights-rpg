@@ -1,7 +1,9 @@
+import { BIKE_SHARE } from '../config';
 import { ORDERS, type Order } from './orders';
 
 // Game state that outlives a map: MapScene restarts on every warp, so anything that must
-// survive one lives here, in memory. Nothing is saved yet (saves come later).
+// survive one lives here, in memory. Nothing is saved yet (saves come later): orders, the bike-share
+// dock counts, whether the player is riding, and the speed setting (session 6f) last for the page load.
 
 export type OrderStatus = 'assigned' | 'picked-up';
 
@@ -27,6 +29,12 @@ export class GameState {
   active: ActiveOrder | null = null;
   completed: string[] = [];
   rewardTotal = 0;
+  /** Bikes docked per dock id (session 6f); a dock not in the map yet holds BIKE_SHARE.bikesAtStart. */
+  private readonly docked = new Map<string, number>();
+  /** True while the player rides a rented bike. */
+  riding = false;
+  /** Speed setting 0-3 (the speed buttons): the multiplier is 2 ** speedLevel. */
+  speedLevel = 0;
 
   constructor(readonly orders: readonly Order[]) {}
 
@@ -59,10 +67,36 @@ export class GameState {
     return { kind: 'nothing' };
   }
 
+  /** Bikes docked at a dock right now. */
+  bikesAt(dockId: string): number {
+    return this.docked.get(dockId) ?? BIKE_SHARE.bikesAtStart;
+  }
+
+  /** Rents a bike from the dock if it has one and the player isn't riding: true if rented. */
+  rent(dockId: string): boolean {
+    const n = this.bikesAt(dockId);
+    if (this.riding || n <= 0) return false;
+    this.docked.set(dockId, n - 1);
+    this.riding = true;
+    return true;
+  }
+
+  /** Returns the ridden bike to the dock if it has a free slot: true if returned. */
+  giveBack(dockId: string, slots: number): boolean {
+    const n = this.bikesAt(dockId);
+    if (!this.riding || n >= slots) return false;
+    this.docked.set(dockId, n + 1);
+    this.riding = false;
+    return true;
+  }
+
   reset(): void {
     this.active = null;
     this.completed = [];
     this.rewardTotal = 0;
+    this.docked.clear();
+    this.riding = false;
+    this.speedLevel = 0;
   }
 }
 

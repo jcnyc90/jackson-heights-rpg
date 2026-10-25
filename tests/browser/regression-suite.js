@@ -38,7 +38,7 @@ try {
   check('A7 world bounds = map', [s.physics.world.bounds.width, s.physics.world.bounds.height], [480, 320]);
   check('A8 colliding tiles', obstacles.layer.data.flat().filter((t) => t.collides).length, 194);
   check('A9 feet body size/offset', [s.player.body.width, s.player.body.height, s.player.body.offset.x, s.player.body.offset.y], [10, 8, 3, 16]);
-  check('A10 texture sizes tiles/player/emote (tiles: 56 since 6e)', [tex('tiles'), tex('player'), tex('emote')], [[64, 224], [48, 96], [10, 10]]);
+  check('A10 texture sizes tiles/player/emote (tiles: 56 since 6e, 57 since 6f: p-dock)', [tex('tiles'), tex('player'), tex('emote')], [[64, 240], [48, 96], [10, 10]]);
   check('A11 walk anims frames', ['down', 'left', 'right', 'up'].map((d) => { const a = g.anims.get(`player-walk-${d}`); return [a.frames.map((f) => f.frame.name), a.frameRate, a.repeat]; }),
     [[[1, 0, 2, 0], 8, -1], [[4, 3, 5, 3], 8, -1], [[7, 6, 8, 6], 8, -1], [[10, 9, 11, 9], 8, -1]]);
   check('A12 camera roundPixels + follows player', [s.cameras.main.roundPixels, s.cameras.main._follow === s.player], [true, true]);
@@ -353,20 +353,22 @@ try {
   const setKeys = (want) => { for (const k of [...held]) if (!want.includes(k)) { ev('keyup', k); held.delete(k); } for (const k of want) if (!held.has(k)) { ev('keydown', k); held.add(k); } };
   // Walks to a tile centre (feet), closed loop: each frame it holds the keys toward the target, judging
   // by where the planned step will land (input acts on the next physics step). Diagonal steps move each
-  // axis 1 or 2 px, so it stops within 1 px of the centre. Returns true on arrival.
+  // axis 1 or 2 px, so it stops within 1 px of the centre. Returns true on arrival. Riding (6f) moves more
+  // per frame, so the thresholds grow with the speed (walking at x1: exactly 2 and 1 px as before).
   const goTo = ([tx, ty]) => {
     const X = tx * 16 + 8, Y = ty * 16 + 12; let stuck = 0, last = '';
+    const tol = Math.max(2, Math.ceil((s.speed?.() ?? 150) / 60) - 1);
     for (let n = 0; n < 4000 && !s.warping; n++) {
       const v = s.player.body.velocity; const px = s.player.x + v.x / 60, py = s.player.y + v.y / 60;
       const dx = X - px, dy = Y - py; const want = [];
-      if (dx >= 2) want.push('ArrowRight'); else if (dx <= -2) want.push('ArrowLeft');
-      if (dy >= 2) want.push('ArrowDown'); else if (dy <= -2) want.push('ArrowUp');
+      if (dx >= tol) want.push('ArrowRight'); else if (dx <= -tol) want.push('ArrowLeft');
+      if (dy >= tol) want.push('ArrowDown'); else if (dy <= -tol) want.push('ArrowUp');
       setKeys(want); run(FRAME);
-      if (!want.length && Math.abs(X - s.player.x) <= 1 && Math.abs(Y - s.player.y) <= 1) return true;
+      if (!want.length && Math.abs(X - s.player.x) <= tol - 1 && Math.abs(Y - s.player.y) <= tol - 1) return true;
       const here = `${s.player.x},${s.player.y}`; stuck = here === last ? stuck + 1 : 0; last = here;
       if (stuck > 30) break;
     }
-    setKeys([]); run(FRAME); return Math.abs(X - s.player.x) <= 1 && Math.abs(Y - s.player.y) <= 1;
+    setKeys([]); run(FRAME); return Math.abs(X - s.player.x) <= tol - 1 && Math.abs(Y - s.player.y) <= tol - 1;
   };
   // Walks a tile path waypoint by waypoint (a run of equal steps is one waypoint). Stops at a warp.
   const walkPath = (path) => {
@@ -934,6 +936,182 @@ try {
   const onPaseo = pw.every(([x, y]) => /paseo-grass|flowers|bike-lane/.test(groundName(Math.floor(x / 16), Math.floor((y - 1) / 16)) ?? ''));
   check('W6 the paseo: sidewalk, bike lane, grass, bike lane, sidewalk across 34th Ave; walking two blocks east stays on it, car-free (no road tile)',
     [[col[0], col[3], col[8], col[14], col[17]], onPaseo, col.includes('road')], [['sidewalk', 'bike-lane', 'paseo-grass', 'bike-lane', 'sidewalk'], true, false]);
+
+  // ---- X. Bike share (6f): docks on the map (X1-X5), renting, riding, returning, orders while riding (X6-X11) ----
+  // Docks exist only when the map has them (src/data/features.json bikeDocks); riding needs the riding flag (or
+  // ?features=riding in dev). Either missing: those checks are skipped with an info line.
+  const CFG = await import('/src/config.ts');
+  const PN = (await import('/src/systems/worldArt.ts')).PROP_NAMES;
+  if (!wi.docks.length) R['X0 info: bike share'] = 'no docks on this map (bikeDocks flag off): X skipped';
+  else {
+    s.state.reset(); gotoMap(WORLD_MAP, 'start');
+    const OPENV = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] }; const FACE = { n: 'down', s: 'up', w: 'right', e: 'left' };
+    const KEY = { down: 'ArrowDown', up: 'ArrowUp', left: 'ArrowLeft', right: 'ArrowRight' };
+    const dTiles = (d) => { const o = []; for (let ty = d.y / 16; ty < (d.y + d.height) / 16; ty++) for (let tx = d.x / 16; tx < (d.x + d.width) / 16; tx++) o.push([tx, ty]); return o; };
+    const startT = tileAt(M.START.spawn.x, M.START.spawn.y);
+    const byDist = (a, b) => Math.hypot(a.x / 16 - startT[0], a.y / 16 - startT[1]) - Math.hypot(b.x / 16 - startT[0], b.y / 16 - startT[1]);
+    const hDock = [...wi.docks].filter((d) => d.width > d.height).sort(byDist)[0];
+    const vDock = [...wi.docks].filter((d) => d.width < d.height).sort(byDist)[0];
+    const standAt = (d, n = 2) => { const [tx, ty] = dTiles(d)[n]; const [ox, oy] = OPENV[d.open]; return [tx + ox, ty + oy]; };
+    const faceDock = (d, n = 2) => { feetAt(...standAt(d, n)); s.facing = FACE[d.open]; run(FRAME); };
+    const badDock = wi.docks.filter((d) => !dTiles(d).every(([tx, ty]) => WD.solid[ty * WD.width + tx] && propName(tx, ty) === 'p-dock' && reach.has(`${tx + OPENV[d.open][0]},${ty + OPENV[d.open][1]}`)));
+    check('X1 docks (6f): every dataset dock on the map (one "docks" rectangle each, 4 slots), every tile a solid p-dock marker, usable from a tile the start reaches',
+      [wi.docks.length, new Set(wi.docks.map((d) => d.dockId)).size, wi.docks.every((d) => d.slots === WORLD.bikeDocks.slots), badDock.map((d) => d.dockId)],
+      [WORLD.bikeDocks.docks.length, WORLD.bikeDocks.docks.length, true, []]);
+    // X2. Sprites: kiosk, 4 rack slots, 3 bikes (decision 3); end-on along an east-west curb, side-on along a north-south one.
+    const dockSprites = (d) => s.children.list.filter((o) => o.texture?.key === 'props' && o.x > d.x && o.x < d.x + d.width && o.y > d.y && o.y <= d.y + d.height);
+    const framesOf = (d) => dockSprites(d).filter((o) => o.visible).map((o) => PN[o.frame.name]).sort();
+    faceDock(hDock); const hFrames = framesOf(hDock); const hDepth = dockSprites(hDock).every((o) => o.depth >= o.y && o.depth < o.y + 0.02);
+    faceDock(vDock); const vFrames = framesOf(vDock);
+    check('X2 dock sprites: a kiosk, 4 rack slots and 3 bikes (owner\'s decision 3), end-on along an east-west curb and side-on along a north-south one; depth = each tile\'s foot y',
+      [hFrames, vFrames, s.world.bikesShown(vDock.dockId), hDepth],
+      [['bike-h', 'bike-h', 'bike-h', 'dock-kiosk', 'dock-rack-h', 'dock-rack-h', 'dock-rack-h', 'dock-rack-h'], ['bike-v', 'bike-v', 'bike-v', 'dock-kiosk', 'dock-rack-v', 'dock-rack-v', 'dock-rack-v', 'dock-rack-v'], 3, true]);
+    // X3. Collision as a prop: pushing into a dock from its open side, the feet box stops flush against it.
+    const ovl = (d) => { const b = s.player.body; return b.x < d.x + d.width && b.right > d.x && b.y < d.y + d.height && b.bottom > d.y; };
+    const gap = (d) => { const b = s.player.body; return { n: d.y - b.bottom, s: b.y - (d.y + d.height), w: d.x - b.right, e: b.x - (d.x + d.width) }[d.open]; };
+    const push = (d) => { faceDock(d); let hit = 0; ev('keydown', KEY[s.facing]); for (let i = 0; i < 40; i++) { run(FRAME); if (ovl(d)) hit++; } ev('keyup', KEY[s.facing]); run(FRAME); return [hit, gap(d)]; };
+    check('X3 docks block like props: walking into one stops flush (never overlapping), along both kinds of curb', [push(hDock), push(vDock)], [[0, 0], [0, 0]]);
+    // X4. Depth by foot y: north of an east-west dock the player is behind it, south of it in front (one side is the sidewalk, the other the road).
+    const bikeImg = () => dockSprites(hDock).find((o) => PN[o.frame.name] === 'bike-h' && o.visible);
+    const [bx2, by2] = dTiles(hDock)[2];
+    feetAt(bx2, by2 - 1); const north = [s.player.depth < bikeImg().depth, drawnAfter(bikeImg(), s.player)];
+    feetAt(bx2, by2 + 1); const south = [s.player.depth > bikeImg().depth, drawnAfter(s.player, bikeImg())];
+    check('X4 depth by foot y: north of an east-west dock the dock draws over the player, south of it the player draws over the dock', [GW.open(bx2, by2 - 1) && GW.open(bx2, by2 + 1), north, south], [true, [true, true], [true, true]]);
+    // X5. Radar: docks are lavender marks (Claude's choice of colour), seen from 12 tiles along the street (the player arrow covers the centre).
+    const [sx5, sy5] = standAt(hDock); const off5 = [12, -12, 15, -15].find((dx) => GW.open(sx5 + dx, sy5)); feetAt(sx5 + off5, sy5); run(FRAME);
+    const lav = (() => { const d2 = radarData(); let n = 0; for (let i = 0; i < d2.length; i += 4) if (d2[i] === 0xc7 && d2[i + 1] === 0xa6 && d2[i + 2] === 0xe6) n++; return n; })();
+    check('X5 radar: a 2x2 lavender mark at a dock in range', lav >= 4, true);
+
+    if (!CFG.FEATURES.riding) R['X6 info: riding'] = 'riding flag off: X6-X11 skipped';
+    else {
+      // X6. Renting (decision 4): face a docked bike, Action, a question; "No" changes nothing, "Yes" = mounted.
+      s.state.reset(); gotoMap(WORLD_MAP, 'start'); faceDock(hDock); const feet0 = [s.player.x, s.player.y];
+      const ask = () => { press(); for (let n = 0; n < 200 && !(s.talking && D().choosing?.()); n++) run(FRAME); return D().pages.join(' ').replace(/\n/g, ' '); };
+      const q1 = ask(); press('ArrowDown'); const pickNo = D().choice; press(); run(FRAME);
+      const afterNo = [s.talking, s.state.riding, s.state.bikesAt(hDock.dockId)];
+      const q2 = ask(); press('ArrowDown'); press('ArrowUp'); const pickYes = D().choice; press(); run(FRAME);
+      const afterYes = [s.talking, s.state.riding, s.state.bikesAt(hDock.dockId), s.world.bikesShown(hDock.dockId), s.player.texture.key, s.speed(), s.physics.world.fps, [s.player.x, s.player.y], [s.player.body.width, s.player.body.height]];
+      check('X6 renting: Action at a dock asks "Ride one?" (Yes/No); No changes nothing; Yes mounts: the dock shows one bike fewer, rider sprite, 300 px/s, the feet stay put',
+        [q1, pickNo, afterNo, q2, pickYes, afterYes],
+        ['A Bike Share dock. Bikes here: 3. Ride one?', 1, [false, false, 3], 'A Bike Share dock. Bikes here: 3. Ride one?', 0, [false, true, 2, 2, 'rider', 300, 120, feet0, [10, 8]]]);
+      // X7. Riding: 300 px/s (5 px a frame) in whole pixels on a straight free run; the ride animation plays.
+      let runRow = null; for (let ty = startT[1] - 30; ty < startT[1] + 30 && !runRow; ty++) for (let tx = startT[0] - 40; tx < startT[0] + 20 && !runRow; tx++) { let ok = true; for (let k2 = -1; k2 < 25 && ok; k2++) ok = GW.open(tx + k2, ty) && GW.open(tx + k2, ty - 1) && GW.open(tx + k2, ty + 1); if (ok) runRow = [tx, ty]; }
+      feetAt(...runRow); const rx0 = s.player.x; const ry0 = s.player.y; const xs = holdKeys(['ArrowRight'], 60);
+      check('X7 riding speed: 300 px/s = 5 px a frame (after the first, as input acts on the next step: 59 frames = 295 px), whole pixels every frame, straight; the ride animation plays',
+        [xs.at(-1)[0] - xs[0][0], xs[0][0] - rx0, xs.every(([x, y]) => Number.isInteger(x) && y === ry0), xs.slice(1).every(([x], i) => x - xs[i][0] === 5), s.player.anims.currentAnim?.key], [295, 0, true, true, 'rider-ride-right']);
+      // X8. Returning (Claude's choice): Action at any dock with a free slot while riding asks to return the bike; Yes = on foot.
+      faceDock(vDock); const q3 = ask(); press(); run(FRAME);
+      const afterReturn = [s.state.riding, s.state.bikesAt(vDock.dockId), s.world.bikesShown(vDock.dockId), s.player.texture.key, s.speed(), s.physics.world.fps];
+      // A full dock while riding, an empty one on foot: a line, no question, nothing changes.
+      faceDock(vDock); ask(); press(); run(FRAME); const reRent = [s.state.riding, s.state.bikesAt(vDock.dockId)];
+      s.state.docked.set(hDock.dockId, hDock.slots); s.world.refreshDock(hDock.dockId); faceDock(hDock);
+      const full = talkAll(); const afterFull = [s.state.riding, s.state.bikesAt(hDock.dockId), s.world.bikesShown(hDock.dockId)];
+      s.state.docked.set(hDock.dockId, 2); s.world.refreshDock(hDock.dockId); faceDock(hDock); ask(); press(); run(FRAME);
+      s.state.docked.set(vDock.dockId, 0); s.world.refreshDock(vDock.dockId); faceDock(vDock); const empty = talkAll();
+      check('X8 returning: Action at a dock with a free slot while riding asks to return, Yes = on foot (walking speed); a full dock (riding) or an empty one (on foot) just says so',
+        [q3, afterReturn, reRent, full, afterFull, [s.state.riding, s.state.bikesAt(hDock.dockId)], empty, [s.state.riding, s.world.bikesShown(vDock.dockId)]],
+        ['Return your bike to this Bike Share dock?', [false, 4, 4, 'player', 150, 60], [true, 3], 'This Bike Share dock is full. Try another one. | ', [true, 4, 4], [false, 3], 'This Bike Share dock is empty right now. Try another one. | ', [false, 0]]);
+      // X9. Counts are live and per dock for the session (not saved): every dock still starts at 3; leaving the bins and coming back keeps the count.
+      s.state.reset(); gotoMap(WORLD_MAP, 'start'); faceDock(hDock); ask(); press(); run(FRAME);
+      const farDock = [...wi.docks].sort(byDist).at(-1); faceDock(farDock); const farCount = s.world.bikesShown(farDock.dockId);
+      faceDock(hDock); const backCount = s.world.bikesShown(hDock.dockId);
+      check('X9 dock counts: live per dock (the rented one shows 2 after its bin was dropped and rebuilt), others untouched (3)', [farCount, backCount, s.state.bikesAt(hDock.dockId)], [3, 2, 2]);
+      // X10. Delivery while riding (Claude's choice: doors and NPCs work as on foot): Order #1 end to end on the bike, along pathfound routes.
+      const ride = {};
+      { const dsp = s.npcs.find((n) => n.spawn.role === 'dispatcher'); const dT = tileAt(dsp.spawn.x, dsp.spawn.y);
+        const sp = facingSpot(grid(WORLD_MAP), ...dT, tileAt(s.player.x, s.player.y)); ride.toDispatcher = walkPath(sp.path); s.facing = sp.facing;
+        ride.dispatcher = talkAll().includes('Order #1 is ready'); ride.leg1 = goFace(o1.pickup).ok; ride.pickup = talkAll();
+        ride.leg2 = goFace(o1.dropoff).ok; ride.deliver = talkAll(); ride.after = [s.state.riding, s.state.completed, s.player.texture.key]; }
+      check('X10 an order completes while riding: the Dispatcher, the pickup door and the dropoff door all work from the bike',
+        ride, { toDispatcher: true, dispatcher: true, leg1: true, pickup: `You picked up Order #1. Bring it to ${placeOf(Dp)}. | `, leg2: true, deliver: 'You delivered Order #1. Nice work! | ', after: [true, ['order-1'], 'rider'] });
+      // X11. The ride survives a scene restart (state in gameState), then reset puts the player back on foot.
+      s.scene.restart({}); run(100); const afterRestart = [s.player.texture.key, s.physics.world.fps, s.player.body.width];
+      s.state.reset(); s.scene.restart({}); run(100);
+      check('X11 riding survives a scene restart; a reset leaves the player on foot at 60 Hz', [afterRestart, [s.player.texture.key, s.physics.world.fps]], [['rider', 120, 10], ['player', 60]]);
+    }
+  }
+
+  // ---- Y. Speed buttons (6f, owner's decision 5): 0/1/2/3 = x1/x2/x4/x8 of walking or riding; physics steps of
+  // 2.5 px on average and never over 4 px (no tunneling), wall sliding, whole pixels at every speed. Needs the
+  // speedButtons flag (or ?features=speedButtons). A step is 4 px only when a diagonal starts sliding along a wall:
+  // the sliding axis carries the diagonal's leftover sub-pixel (as walking has since 6d).
+  if (!CFG.FEATURES.speedButtons) R['Y0 info: speed'] = 'speedButtons flag off: Y skipped';
+  else {
+    s.state.reset(); gotoMap(WORLD_MAP, 'start');
+    const evk = (type, n, pad = false) => window.dispatchEvent(new KeyboardEvent(type, { key: String(n), code: pad ? `Numpad${n}` : `Digit${n}`, keyCode: (pad ? 96 : 48) + n, which: (pad ? 96 : 48) + n, bubbles: true }));
+    const keyLevel = (n, pad = false) => { evk('keydown', n, pad); run(FRAME); evk('keyup', n, pad); run(FRAME); };
+    const tapLevel = (n) => { document.querySelector(`.speed-btn[data-level="${n}"]`).dispatchEvent(new PointerEvent('pointerdown', { pointerId: 40 + n, pointerType: 'touch', bubbles: true, cancelable: true })); run(FRAME); };
+    const lit = () => [...document.querySelectorAll('.speed-btn.on')].map((b) => +b.dataset.level);
+    const speedState = () => [s.state.speedLevel, s.speed(), s.physics.world.fps, lit()];
+    const ride = (on) => { s.state.riding = on; s.applyRider(); run(FRAME); };
+    // Y1. Keys 0-3 (top row and keypad) and the buttons set x1/x2/x4/x8; the pressed one stays lit; the setting holds (walking, a restart) until another press.
+    const y1 = {};
+    for (const n of [0, 1, 2, 3]) { keyLevel(n); y1[`key${n}`] = speedState(); }
+    keyLevel(1, true); y1.numpad1 = speedState(); tapLevel(2); y1.tap2 = speedState(); tapLevel(3); y1.tap3 = speedState();
+    holdKeys(['ArrowLeft'], 10); y1.afterWalk = speedState(); s.scene.restart({}); run(100); y1.afterRestart = speedState();
+    ride(true); y1.riding = speedState(); keyLevel(0); y1.riding0 = speedState(); ride(false); y1.walking0 = speedState();
+    check('Y1 speed keys 0-3 (and keypad) and buttons: x1/x2/x4/x8 of walking (150 px/s) or riding (300), physics steps scaled to match; the pressed one stays lit and holds until another press',
+      y1, { key0: [0, 150, 60, [0]], key1: [1, 300, 120, [1]], key2: [2, 600, 240, [2]], key3: [3, 1200, 480, [3]], numpad1: [1, 300, 120, [1]], tap2: [2, 600, 240, [2]], tap3: [3, 1200, 480, [3]],
+        afterWalk: [3, 1200, 480, [3]], afterRestart: [3, 1200, 480, [3]], riding: [3, 2400, 960, [3]], riding0: [0, 300, 120, [0]], walking0: [0, 150, 60, [0]] });
+    // A long free road row (for straight runs at speed) and a long facade (for sliding).
+    let longRow = null; for (let ty = wy0 + 20; ty < wy0 + 200 && !longRow; ty++) for (let tx = wx0 + 2; tx < wx0 + 60 && !longRow; tx++) { let ok = true; for (let k2 = 0; k2 < 140 && ok; k2++) ok = GW.open(tx + k2, ty); if (ok) longRow = [tx, ty]; }
+    let facade = null; for (let ty = R37 - 60; ty < R37 + 60 && !facade; ty++) for (let tx = C80 - 120; tx < C80 + 120 && !facade; tx++) { let ok = true; for (let k2 = 0; k2 < 18 && ok; k2++) ok = GW.open(tx + k2, ty) && !GW.open(tx + k2, ty - 1) && WD.buildings.some((b) => tx + k2 >= b.x && tx + k2 < b.x + b.w && ty - 1 >= b.y && ty - 1 < b.y + b.h); if (ok) facade = [tx, ty]; }
+    // Per physics step: the largest move on either axis, and any overlap of the feet box with a solid tile of the full map, an NPC or the walk edge.
+    const stepLog = { max: 0, bad: 0, steps: 0, last: null };
+    const npcHit = () => s.npcs.some((n) => { const a = s.player.body, b = n.sprite.body; return a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y; });
+    const inWalkB = () => { const b = s.player.body, w = wi.walk; return b.x >= w.x && b.y >= w.y && b.right <= w.x + w.width && b.bottom <= w.y + w.height; };
+    const solidHit = () => { const b = s.player.body, e = 0.01; for (let ty = Math.floor(b.y / 16); ty <= Math.floor((b.y + b.height - e) / 16); ty++) for (let tx = Math.floor(b.x / 16); tx <= Math.floor((b.x + b.width - e) / 16); tx++) if (WD.solid[ty * WD.width + tx]) return true; return false; };
+    const onStep = () => { const b = s.player.body; if (stepLog.last) stepLog.max = Math.max(stepLog.max, Math.abs(b.x - stepLog.last[0]), Math.abs(b.y - stepLog.last[1])); stepLog.last = [b.x, b.y]; stepLog.steps++; if (solidHit() || npcHit() || !inWalkB()) stepLog.bad++; };
+    const watchSteps = (on) => { stepLog.last = null; s.physics.world[on ? 'on' : 'off']('worldstep', onStep); };
+    // Y2. Each speed, walking and riding: a straight run east moves base/60 x 2^level px a frame (whole pixels), in physics steps of at most 3 px.
+    const y2 = {}; const y2want = {};
+    for (const riding of [false, true]) for (const n of [0, 1, 2, 3]) {
+      ride(riding); keyLevel(n); feetAt(...longRow); run(FRAME); watchSteps(true); stepLog.max = 0;
+      const tr = holdKeys(['ArrowRight'], 9); watchSteps(false);
+      const per = tr.slice(2).map(([x], i) => x - tr[i + 1][0]);
+      const want = ((riding ? 300 : 150) * 2 ** n) / 60;
+      y2[`${riding ? 'ride' : 'walk'}x${2 ** n}`] = [per.reduce((a, b) => a + b, 0) / per.length, tr.every(([x, y]) => Number.isInteger(x) && Number.isInteger(y)), stepLog.max <= 3];
+      y2want[`${riding ? 'ride' : 'walk'}x${2 ** n}`] = [n === 0 && !riding ? per.reduce((a, b) => a + b, 0) / per.length : want, true, true];
+    }
+    ride(false); keyLevel(0);
+    check('Y2 every speed, walking and riding: px a frame = speed / 60 (walking x1 alternates 2 and 3), whole pixels, physics steps of at most 3 px in a straight run', [y2, y2.walkx1[0] === 2.5 || Math.abs(y2.walkx1[0] - 2.5) <= 0.5], [y2want, true]);
+    // Y3. Collision fuzz at x8 walking (1200 px/s) and x8 riding (2400 px/s): 30 seeded random 8-way runs each, checked after every physics step.
+    const fuzz = (riding) => {
+      gotoMap(WORLD_MAP, 'start'); ride(riding); keyLevel(3); stepLog.bad = 0; stepLog.max = 0; stepLog.steps = 0; watchSteps(true);
+      let seed = riding ? 11 : 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      const dirs = [['ArrowUp'], ['ArrowDown'], ['ArrowLeft'], ['ArrowRight'], ['ArrowUp', 'ArrowRight'], ['ArrowDown', 'ArrowLeft'], ['ArrowUp', 'ArrowLeft'], ['ArrowDown', 'ArrowRight']];
+      for (let i = 0; i < 30; i++) { const d2 = dirs[Math.floor(rnd() * 8)]; for (const k2 of d2) ev('keydown', k2); run(Math.round(200 + rnd() * 1200)); for (const k2 of d2) ev('keyup', k2); run(FRAME); }
+      watchSteps(false); const out = [stepLog.bad, stepLog.max, stepLog.steps]; keyLevel(0); ride(false); return out;
+    };
+    const fw = fuzz(false), fr = fuzz(true);
+    R['Y3 info: x8 fuzz (bad steps / largest step px / steps), walking and riding'] = `${fw.join(' / ')}; ${fr.join(' / ')}`;
+    check('Y3 no tunneling at x8 walking and x8 riding: after every physics step of 30 random runs each, the feet box overlaps no solid tile, NPC or the walk edge; no step over 4 px',
+      [fw[0], fw[1] <= 4, fw[2] > 5000, fr[0], fr[1] <= 4, fr[2] > 10000], [0, true, true, 0, true, true]);
+    // Y4. Wall sliding at every speed: up-right along a building front (the longest straight one is 18 tiles: 7 frames, the
+    // last 4 measured), the player keeps full speed east and stays against the wall.
+    const y4 = {}; const y4want = {};
+    for (const riding of [false, true]) for (const n of [0, 1, 2, 3]) {
+      ride(riding); keyLevel(n); at(facade[0] * 16 + 8, facade[1] * 16 + 8); run(FRAME); // feet box flush against the wall
+      const tr = holdKeys(['ArrowUp', 'ArrowRight'], 7); const per = tr.slice(3).map(([x], i) => x - tr[i + 2][0]);
+      const want = ((riding ? 300 : 150) * 2 ** n) / 60;
+      const name = `${riding ? 'ride' : 'walk'}x${2 ** n}`;
+      y4[name] = [Math.abs(per.reduce((a, b) => a + b, 0) / per.length - want) <= 0.5, tr.slice(2).every(([, y]) => y === tr[2][1]), s.player.body.y === facade[1] * 16];
+      y4want[name] = [true, true, true];
+    }
+    ride(false); keyLevel(0);
+    check('Y4 wall sliding at every speed, walking and riding: pressing up-right along a building front keeps full speed east, flush against the wall', y4, y4want);
+    // Y5. A long frame (200 ms, the most Phaser's clock gives one frame) at x8 riding toward a wall: 80 steps, none through it; the collision window follows.
+    const col5 = [...Array(18).keys()].map((k2) => facade[0] + k2).find((tx) => [...Array(9).keys()].every((k2) => GW.open(tx, facade[1] + k2)));
+    gotoMap(WORLD_MAP, 'start'); ride(true); keyLevel(3); feetAt(col5, facade[1] + 8); run(FRAME); watchSteps(true); stepLog.bad = 0; stepLog.max = 0;
+    ev('keydown', 'ArrowUp'); run(FRAME); T += 200; g.step(T, 200); frames++; ev('keyup', 'ArrowUp'); run(FRAME); watchSteps(false);
+    const longFrame = [stepLog.bad, stepLog.max <= 4, s.player.body.y === facade[1] * 16];
+    T += 200; ev('keydown', 'ArrowLeft'); g.step(T, 200); frames++; ev('keyup', 'ArrowLeft'); run(FRAME);
+    const a2 = s.world.anchor; const bodyT = [s.player.body.x / 16, s.player.body.y / 16];
+    keyLevel(0); ride(false);
+    check('Y5 a 200 ms frame at x8 riding: into a wall, no step passes it (0 overlaps, steps of 4 px or less, stopped flush); along the street, the collision window still holds the player',
+      [longFrame, bodyT[0] >= a2.x + 1 && bodyT[0] < a2.x + 47 && bodyT[1] >= a2.y + 1 && bodyT[1] < a2.y + 39], [[0, true, true], true]);
+    s.state.reset(); s.scene.restart({}); run(100);
+  }
 } catch (e) {
   R.ERROR = String(e && e.stack || e);
 } finally {

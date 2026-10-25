@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
-import { DIRECTIONS, FONT, PLAYER_FRAME, TEXTURES } from '../config';
+import { DIRECTIONS, FONT, PLAYER_FRAME, RIDER_FRAME, TEXTURES } from '../config';
 import { generatePlaceholderTextures } from '../systems/placeholderArt';
-import { generatePropTextures } from '../systems/worldArt';
+import { generatePropTextures, generateRiderTexture } from '../systems/worldArt';
 import { registerFont } from '../systems/font';
 import { MAP_LIST, validateLinks } from '../systems/maps';
 
@@ -25,6 +25,7 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     generatePlaceholderTextures(this);
     generatePropTextures(this);
+    generateRiderTexture(this);
     registerFont(this);
 
     // Walk cycle per direction: step A, stand, step B, stand (frame = row * columns + col).
@@ -33,6 +34,14 @@ export class BootScene extends Phaser.Scene {
       this.anims.create({
         key: `player-walk-${dir}`,
         frames: this.anims.generateFrameNumbers(TEXTURES.player, { frames: [1, 0, 2, 0].map((c) => base + c) }),
+        frameRate: 8,
+        repeat: -1,
+      });
+      // Riding (session 6f): pedal A, coast, pedal B, coast.
+      const rbase = row * RIDER_FRAME.columns;
+      this.anims.create({
+        key: `rider-ride-${dir}`,
+        frames: this.anims.generateFrameNumbers(TEXTURES.rider, { frames: [1, 0, 2, 0].map((c) => rbase + c) }),
         frameRate: 8,
         repeat: -1,
       });

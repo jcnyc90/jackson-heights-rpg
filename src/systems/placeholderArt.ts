@@ -432,6 +432,7 @@ const TILE_PAINTERS: Record<string, Painter> = {
   'p-pillar': marker(C.steelLight),
   'p-stairs': marker(C.station),
   'p-planter': marker(C.planter),
+  'p-dock': marker(C.marking),
   playground: (ctx, x, y) => {
     rect(ctx, C.awning, x, y, 16, 16);
     for (const [px, py] of [[2, 3], [9, 7], [5, 12], [13, 13]]) rect(ctx, C.brick, x + px, y + py, 2, 2);
@@ -510,6 +511,11 @@ interface Part {
   h: number;
   color: string;
   outline: boolean;
+}
+
+/** The player's figure (session 6f: the rider sheet reuses its upper body). */
+export function drawPlayerFigure(ctx: Ctx, ox: number, oy: number, dir: Direction, step: number): void {
+  drawPerson(ctx, ox, oy, dir, step, PLAYER_LOOK);
 }
 
 /** step: 0 = stand, 1 = left foot forward, 2 = right foot forward. */

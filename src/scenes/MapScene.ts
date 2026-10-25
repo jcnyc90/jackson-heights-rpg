@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import {
   DIRECTIONS,
+  FEATURES,
   FONT,
   GAME_HEIGHT,
   GAME_WIDTH,
@@ -10,6 +11,8 @@ import {
   PLAYER_FRAME,
   PLAYER_SPEED,
   RADAR,
+  RIDE_SPEED,
+  RIDER_FRAME,
   STEP,
   TALK_RANGE,
   TARGET_ARROW,
@@ -22,10 +25,11 @@ import {
 } from '../config';
 import { Controls } from '../systems/controls';
 import { gameState } from '../systems/gameState';
-import { insideWarp, resolveDestination, START, type DeliveryPoint, type MapInfo, type Warp } from '../systems/maps';
+import { insideWarp, resolveDestination, START, type DeliveryPoint, type DockRect, type MapInfo, type Warp } from '../systems/maps';
 import { DIALOGUE, readNpcSpawns, type NpcSpawn } from '../systems/npcs';
 import { orderParams, placeName } from '../systems/orders';
 import { Radar } from '../systems/radar';
+import { showSpeed } from '../systems/touchControls';
 import { t } from '../systems/strings';
 import { WorldView } from '../systems/worldView';
 import type { DialogueData, DialogueScene } from './DialogueScene';
@@ -41,7 +45,12 @@ const OPPOSITE: Record<Direction, Direction> = { up: 'down', down: 'up', left: '
 
 const EMOTE_MS = 500;
 const NAME_CARD_MS = ZONE_CARD.showMs;
-/** Pixels per 60 Hz physics step at walking speed (PLAYER_SPEED / 60 = 2.5; whole pixels via the accumulator). */
+/**
+ * Pixels per physics step: 2.5 at every speed (whole pixels via the accumulator, 2 and 3 alternately; 4 for the one
+ * step where a diagonal starts sliding along a wall, carrying the diagonal's leftover). Walking at PLAYER_SPEED the
+ * physics runs at 60 Hz; faster (riding, the speed setting: session 6f) it runs proportionally more steps a second,
+ * so no step moves more than 4 px and the player can't pass through a wall (16 px), a prop or an NPC's feet (8 px).
+ */
 const STEP_PX = PLAYER_SPEED / 60;
 // Sprites sort by feet y (their depth): characters, and on the world map buildings, trees, posts
 // and signs too. "ground" and "obstacles" stay below them; "above" (tree canopies on the test map)
@@ -110,6 +119,10 @@ export class MapScene extends Phaser.Scene {
   private emoteHideAt = 0;
   /** True from the Action press that opens the text window until the press that closes it. */
   private talking = false;
+  /** For a question (session 6f): what to do with the answer when the window closes. */
+  private onChoice: ((choice: number) => void) | null = null;
+  /** The direction held last frame while talking (a new press moves a question's selection). */
+  private talkDir: Direction8 | null = null;
   /** True from stepping onto a warp until the next map has faded in. */
   private warping = false;
   /** Warps fire only after the player has stood off every warp (so arrival can't bounce back). */
@@ -140,6 +153,8 @@ export class MapScene extends Phaser.Scene {
     // Reset per-run state (class fields survive scene.restart()).
     this.emoteHideAt = 0;
     this.talking = false;
+    this.onChoice = null;
+    this.talkDir = null;
     this.warping = false;
     this.moveDir = null;
     this.acc = { x: 0, y: 0 };
@@ -164,7 +179,7 @@ export class MapScene extends Phaser.Scene {
     let map: Phaser.Tilemaps.Tilemap;
     let obstacles: Phaser.Tilemaps.TilemapLayer;
     if (info.world) {
-      this.world = new WorldView(this, info, info.world, { ground: DEPTH.ground, collision: DEPTH.obstacles });
+      this.world = new WorldView(this, info, info.world, { ground: DEPTH.ground, collision: DEPTH.obstacles }, (id) => this.state.bikesAt(id));
       map = this.world.map;
       obstacles = this.world.collision;
     } else {
@@ -192,6 +207,8 @@ export class MapScene extends Phaser.Scene {
 
     this.player = this.addCharacter(spawn.x, spawn.y, TEXTURES.player, this.standFrame());
     this.player.setCollideWorldBounds(true);
+    // A bike rented before a restart is still being ridden; the speed setting holds too.
+    this.applyRider();
     this.physics.add.collider(this.player, obstacles);
 
     this.npcs = readNpcSpawns(info.world ? (info.data as Parameters<typeof readNpcSpawns>[0]) : map).map((npcSpawn) => {
@@ -229,7 +246,7 @@ export class MapScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true);
     if (info.world) {
       this.world?.update(spawn.x, spawn.y, true);
-      this.radar = new Radar(this, info.world, walk, RADAR.margin, RADAR.margin, DEPTH.radar);
+      this.radar = new Radar(this, info.world, walk, RADAR.margin, RADAR.margin, DEPTH.radar, info.docks);
       this.cornerBox = this.add.rectangle(0, 0, 0, 0, HUD.box).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.corner).setVisible(false);
       this.cornerText = this.add.bitmapText(0, 0, FONT.key, '').setScrollFactor(0).setDepth(DEPTH.corner + 1).setVisible(false);
     }
@@ -243,6 +260,7 @@ export class MapScene extends Phaser.Scene {
 
     this.controls = new Controls(this);
     this.warpArmed = !this.warpUnderFeet();
+    showSpeed(this.state.speedLevel);
 
     if (data.viaWarp) {
       this.warping = true;
@@ -261,12 +279,17 @@ export class MapScene extends Phaser.Scene {
     // Read input every frame, even while locked, so presses made during a fade are swallowed.
     const action = this.controls.actionPressed();
     const dir = this.controls.direction();
+    const speedLevel = this.controls.speedPressed();
+    if (speedLevel !== null && speedLevel !== this.state.speedLevel) this.setSpeedLevel(speedLevel);
 
     if (this.warping) {
       this.stopWalking();
     } else if (this.talking) {
-      // Movement is locked while the text window is open; Action drives the window.
+      // Movement is locked while the text window is open; Action drives the window, and a new direction press
+      // moves a question's selection (up/left: previous answer, down/right: next).
       this.stopWalking();
+      if (dir && dir !== this.talkDir && this.scene.isActive('Dialogue')) (this.scene.get('Dialogue') as DialogueScene).moveChoice(STEP[dir].y || STEP[dir].x);
+      this.talkDir = dir;
       if (action) this.advanceDialogue();
     } else {
       const warp = this.warpUnderFeet();
@@ -282,7 +305,7 @@ export class MapScene extends Phaser.Scene {
           this.moveDir = dir;
           this.planStep();
         }
-        this.player.anims.play(`player-walk-${this.facing}`, true);
+        this.player.anims.play(`${this.state.riding ? 'rider-ride' : 'player-walk'}-${this.facing}`, true);
       } else {
         this.stopWalking();
       }
@@ -290,8 +313,10 @@ export class MapScene extends Phaser.Scene {
       if (action) {
         const npc = this.npcInFront();
         const point = npc ? undefined : this.pointInFront();
+        const dock = npc || point || !FEATURES.riding ? undefined : this.dockInFront();
         if (npc) this.startDialogue(npc);
         else if (point) this.useDeliveryPoint(point);
+        else if (dock) this.useDock(dock);
         else {
           // Nobody to talk to: a "!" bubble confirms the input works.
           this.emote.setVisible(true);
@@ -304,7 +329,7 @@ export class MapScene extends Phaser.Scene {
     // after update), so read the body to avoid trailing the player by a frame.
     const { body } = this.player;
     this.player.setDepth(body.bottom);
-    this.world?.update(body.center.x, body.bottom);
+    this.world?.update(body.center.x, body.bottom, false, this.speed());
     if (this.emote.visible) {
       this.emote.setPosition(body.center.x, body.bottom - PLAYER_FRAME.height - 1);
       if (time >= this.emoteHideAt) this.emote.setVisible(false);
@@ -342,12 +367,54 @@ export class MapScene extends Phaser.Scene {
       const s = speed(axis, axis === 'x' ? blockedY : blockedX);
       this.planned[axis] = Math.floor(this.acc[axis] + s + 1e-9);
     }
-    this.player.setVelocity(step.x * this.planned.x * 60, step.y * this.planned.y * 60);
+    const fps = this.physics.world.fps;
+    this.player.setVelocity(step.x * this.planned.x * fps, step.y * this.planned.y * fps);
   }
 
-  /** After each physics step: keep the leftover sub-pixel progress, then plan the next step. */
+  /** The player's speed now, px/s: walking or riding, times the speed setting (2 ** level; session 6f). */
+  speed(): number {
+    return (this.state.riding ? RIDE_SPEED : PLAYER_SPEED) * 2 ** this.state.speedLevel;
+  }
+
+  /** Physics steps a second for the current speed, so every step stays STEP_PX (60 Hz walking at x1, up to 960 Hz). */
+  private applySpeed(): void {
+    const fps = (60 * this.speed()) / PLAYER_SPEED;
+    if (this.physics.world.fps === fps) return;
+    this.physics.world.setFPS(fps);
+    if (this.moveDir) this.planStep(); // the velocity of the planned step follows the new step rate
+  }
+
+  /** The speed buttons and keys 0-3 (owner's decision 5): x1, x2, x4, x8 of the current base speed; held until changed. */
+  private setSpeedLevel(level: number): void {
+    this.state.speedLevel = level;
+    this.applySpeed();
+    showSpeed(level);
+  }
+
+  /**
+   * Shows the player walking or on a bike (gameState.riding) and sets the speed. The rider sheet is larger; the
+   * feet box stays PLAYER_FEET at the bottom centre, so the feet (and collision) don't move.
+   */
+  private applyRider(): void {
+    const riding = this.state.riding;
+    const key = riding ? TEXTURES.rider : TEXTURES.player;
+    if (this.player.texture.key !== key) {
+      this.player.anims.stop();
+      this.player.setTexture(key, this.standFrame());
+      const f = riding ? RIDER_FRAME : PLAYER_FRAME;
+      this.player.body.setOffset((f.width - PLAYER_FEET.width) / 2, f.height - PLAYER_FEET.height);
+      this.player.body.reset(this.player.x, this.player.y);
+    }
+    this.applySpeed();
+  }
+
+  /**
+   * After each physics step: keep the collision window around the player (session 6f: at high speed a long frame
+   * runs many steps), keep the leftover sub-pixel progress, then plan the next step.
+   */
   private onWorldStep(): void {
     if (!this.moveDir) return;
+    this.world?.keepWindow(this.player.body.center.x, this.player.body.bottom);
     const step = STEP[this.moveDir];
     const b = this.player.body.blocked;
     const blockedX = (step.x < 0 && b.left) || (step.x > 0 && b.right);
@@ -657,9 +724,48 @@ export class MapScene extends Phaser.Scene {
     this.openDialogue([line]);
   }
 
-  private openDialogue(entries: string[]): void {
+  /** The nearest bike-share dock whose rectangle overlaps the talk probe (session 6f). */
+  private dockInFront(): DockRect | undefined {
+    const probe = this.talkProbe();
+    const { center } = this.player.body;
+    const dist = (d: DockRect) => Phaser.Math.Distance.Between(center.x, center.y, Phaser.Math.Clamp(center.x, d.x, d.x + d.width), Phaser.Math.Clamp(center.y, d.y, d.y + d.height));
+    return this.info.docks.filter((d) => Phaser.Geom.Rectangle.Overlaps(probe, new Phaser.Geom.Rectangle(d.x, d.y, d.width, d.height))).sort((a, b) => dist(a) - dist(b))[0];
+  }
+
+  /**
+   * Action at a dock (owner's decision 4; the return rule is Claude's choice): on foot, if it has a bike, a
+   * question rents one ("Yes" = riding); riding, if it has a free slot, a question returns the bike there. An
+   * empty dock (on foot) or a full one (riding) just says so.
+   */
+  private useDock(dock: DockRect): void {
+    const name = t('bike.name');
+    const bikes = this.state.bikesAt(dock.dockId);
+    const yesNo = [t('choice.yes'), t('choice.no')];
+    if (!this.state.riding) {
+      if (bikes === 0) return this.openDialogue([t('bike.empty', { name })]);
+      this.openDialogue([t('bike.rent.ask', { name, count: bikes })], yesNo, (c) => {
+        if (c === 0 && this.state.rent(dock.dockId)) this.afterDock(dock);
+      });
+    } else {
+      if (bikes >= dock.slots) return this.openDialogue([t('bike.full', { name })]);
+      this.openDialogue([t('bike.return.ask', { name })], yesNo, (c) => {
+        if (c === 0 && this.state.giveBack(dock.dockId, dock.slots)) this.afterDock(dock);
+      });
+    }
+  }
+
+  /** After renting or returning: the dock's bikes, the player's sprite and speed. */
+  private afterDock(dock: DockRect): void {
+    this.world?.refreshDock(dock.dockId);
+    this.applyRider();
+  }
+
+  private openDialogue(entries: string[], choices?: string[], onChoice?: (choice: number) => void): void {
+    this.onChoice = onChoice ?? null;
+    this.talkDir = this.controls.direction();
     const data: DialogueData = {
       entries,
+      ...(choices ? { choices } : {}),
       // Near the top edge of the map the camera stops scrolling, so the player can be in
       // the top half of the screen; move the window out of the way then.
       atBottom: this.player.y - this.cameras.main.scrollY < GAME_HEIGHT / 2,
@@ -673,8 +779,12 @@ export class MapScene extends Phaser.Scene {
     const dialogue = this.scene.get('Dialogue') as DialogueScene;
     if (!this.scene.isActive('Dialogue')) return; // launch is queued until the next step
     if (dialogue.advance() === 'closed') {
+      const answer = this.onChoice;
+      const choice = dialogue.choice;
+      this.onChoice = null;
       this.scene.stop('Dialogue');
       this.talking = false;
+      answer?.(choice);
     }
   }
 
@@ -683,6 +793,6 @@ export class MapScene extends Phaser.Scene {
   }
 
   private standFrame(): number {
-    return DIRECTIONS.indexOf(this.facing) * PLAYER_FRAME.columns;
+    return DIRECTIONS.indexOf(this.facing) * (this.state.riding ? RIDER_FRAME.columns : PLAYER_FRAME.columns);
   }
 }

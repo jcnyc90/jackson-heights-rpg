@@ -92,6 +92,55 @@ canvas {
   }
 }
 
+/* The thumbstick and, under it, the speed buttons (session 6f). */
+#stick-col {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Landscape with the speed buttons: the column sits mid-height, so the row (wider than the letterbox bar on
+   small phones) stays clear of the order ticket at the bottom of the game (Claude's choice). */
+@media (orientation: landscape) {
+  .touch.speed #stick-col {
+    align-self: center;
+  }
+}
+
+/* Speed buttons: four round 44 px touch targets in a row; the selected one stays highlighted. */
+#speed-row {
+  display: flex;
+  gap: 4px;
+}
+
+#speed-row[hidden] {
+  display: none;
+}
+
+.speed-btn {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pad);
+  border: 3px solid var(--outline);
+  box-shadow: 0 3px 0 var(--outline);
+  color: var(--outline);
+  font: bold 18px/1 ui-monospace, Menlo, monospace;
+  touch-action: none;
+}
+
+.speed-btn.on {
+  background: var(--pad-pressed);
+  box-shadow: 0 1px 0 var(--outline);
+  transform: translateY(2px);
+}
+
 /* Thumbstick: a round base with a knob that follows the thumb (src/systems/touchControls.ts
    moves the knob with a transform and sets data-dir while a direction is held). */
 #stick {

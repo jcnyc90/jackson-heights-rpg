@@ -9,6 +9,7 @@
 // steering the stick closed-loop (each frame it points the stick toward the next waypoint).
 // Session 6e: the radar (top-left) replaces the minimap and is checked the same way; the world map's
 // collision comes from its decoded collision layer (external map, drawn in chunks).
+// Session 6f: the speed buttons under the stick (sizes, row, overlaps, taps).
 // Deterministic frame stepping like regression-suite.js. Returns a results object.
 const g = window.game; const s = g.scene.getScene('Map');
 const FRAME = 1000 / 60; let T = performance.now();
@@ -90,6 +91,37 @@ try {
   const mmTicket = ticketRects.filter(([, , y, , gr]) => y !== 24 && gameInter(gr, mmGame)).map(([id, st]) => `${id}/${st}`);
   R.radarVsControls = { gameRect: mmGame, cssRect: mmCss.map(Math.round), hitsStick: inter(mmCss, ctl.stick), hitsAction: inter(mmCss, ctl.action), outsideCanvas: mmCss[0] < cr.left - 0.5 || mmCss[1] < cr.top - 0.5 || mmCss[2] > cr.right + 0.5 || mmCss[3] > cr.bottom + 0.5, hitsTicket: mmTicket };
   R.radarVsControls.result = !R.radarVsControls.hitsStick && !R.radarVsControls.hitsAction && !R.radarVsControls.outsideCanvas && mmTicket.length === 0 ? 'PASS' : 'FAIL';
+
+  // Speed buttons (session 6f, owner's decision 5): four round buttons in a row directly under the stick, each at
+  // least 44 CSS px; none overlaps the stick, the Action button, the ticket (every order and status, bottom and
+  // top), the radar or the corner name (the widest); a tap sets x1/x2/x4/x8 and lights that button until the next.
+  const CFG = await import('/src/config.ts');
+  if (!CFG.FEATURES.speedButtons) R.speedButtons = { result: 'SKIPPED (speedButtons flag off)' };
+  else {
+    const STRS = await import('/src/systems/strings.ts');
+    const btns = [...document.querySelectorAll('.speed-btn')]; const br = btns.map((b) => b.getBoundingClientRect());
+    const rect = (r) => [r.left, r.top, r.right, r.bottom];
+    const widest = Math.max(...s.info.corners.map((c) => [...STRS.t('place.corner', { street: STRS.t(c.street), cross: STRS.t(c.cross) })].length)) * 6 + 6;
+    const cornerCss = css(256 - 4 - widest, 4, widest, 12 + 6);
+    const others = { stick: ctl.stick, action: ctl.action, radar: mmCss, corner: cornerCss };
+    const overlaps = [];
+    br.forEach((r, i) => {
+      for (const [name, q] of Object.entries(others)) if (inter(rect(r), q)) overlaps.push(`${i}:${name}`);
+      for (const [id, st, y, q] of ticketRects) if (inter(rect(r), q)) overlaps.push(`${i}:ticket ${id}/${st}/y=${y}`);
+    });
+    const taps = [3, 1, 2, 0].map((n) => { pe(btns[n], 'pointerdown', br[n].left + 22, br[n].top + 22, 300 + n); run(1000 / 60); pe(btns[n], 'pointerup', br[n].left + 22, br[n].top + 22, 300 + n); run(1000 / 60); return [s.state.speedLevel, s.speed(), [...document.querySelectorAll('.speed-btn.on')].map((b) => +b.dataset.level)]; });
+    const sb = {
+      labels: btns.map((b) => b.textContent.trim()), sizes: br.map((r) => [Math.round(r.width), Math.round(r.height)]),
+      // Layout positions (offsetTop/Left ignore the lit button's 2 px pressed-in transform).
+      inARow: btns.every((b, i) => b.offsetTop === btns[0].offsetTop && (!i || b.offsetLeft >= btns[i - 1].offsetLeft + btns[i - 1].offsetWidth)),
+      underStick: [Math.round(br[0].top - d.bottom), Math.round(br[0].left - d.left)], rowCss: [Math.round(br[0].left), Math.round(br[0].top), Math.round(br[3].right), Math.round(br[3].bottom)],
+      hitTest: br.map((r, i) => document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === btns[i]),
+      overlaps, taps,
+    };
+    sb.result = sb.labels.join() === '0,1,2,3' && sb.sizes.every(([w, h]) => w >= 44 && h >= 44) && sb.inARow && sb.underStick[0] >= 0 && sb.underStick[0] <= 16 && Math.abs(sb.underStick[1]) <= 1
+      && sb.hitTest.every(Boolean) && overlaps.length === 0 && JSON.stringify(taps) === JSON.stringify([[3, 1200, [3]], [1, 300, [1]], [2, 600, [2]], [0, 150, [0]]]) ? 'PASS' : 'FAIL';
+    R.speedButtons = sb;
+  }
 
   // One order, touch only: Dispatcher (Action) -> thumbstick along pathfound 8-way routes -> pick up -> deliver.
   const MAPS = await import('/src/systems/maps.ts');

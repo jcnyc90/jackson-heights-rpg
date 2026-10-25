@@ -1,5 +1,5 @@
 {
-  "description": "Tile ids of the placeholder tilesets (DESIGN.md 2.3). Index = Tiled tile id; gid = id + the tileset's firstgid. src/systems/placeholderArt.ts paints one tile per name, in this order; scripts/generate-maps.mjs places them by name. Ids 0-7 are the session 1 set (the test map uses them): append, never reorder. Session 6e appends ground tiles for parks, the grassy paseo, bike lanes, lots and yards, 'solid' (the world map's collision layer), and prop markers ('p-' names): on the world map's 'props' layer a marker stands for a sprite drawn at that tile (trees, posts, benches...).",
+  "description": "Tile ids of the placeholder tilesets (DESIGN.md 2.3). Index = Tiled tile id; gid = id + the tileset's firstgid. src/systems/placeholderArt.ts paints one tile per name, in this order; scripts/generate-maps.mjs places them by name. Ids 0-7 are the session 1 set (the test map uses them): append, never reorder. Session 6e appends ground tiles for parks, the grassy paseo, bike lanes, lots and yards, 'solid' (the world map's collision layer), and prop markers ('p-' names): on the world map's 'props' layer a marker stands for a sprite drawn at that tile (trees, posts, benches...). Session 6f appends 'p-dock': every tile of a bike-share dock's footprint (the game draws the dock from the map's 'docks' layer).",
   "tiles": [
     "grass",
     "sidewalk",
@@ -56,7 +56,8 @@
     "p-pillar",
     "p-stairs",
     "p-planter",
-    "playground"
+    "playground",
+    "p-dock"
   ],
   "collides": [
     "wall",

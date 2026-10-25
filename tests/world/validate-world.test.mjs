@@ -33,7 +33,7 @@ test('the shipped dataset covers all four locked zones plus the northern area, a
 
 test('rejects a non-object and a wrong schemaVersion', () => {
   assert.deepEqual(validateWorld(null).errors, ['dataset must be a JSON object']);
-  expectError((d) => (d.schemaVersion = 4), /schemaVersion must be 5/);
+  expectError((d) => (d.schemaVersion = 5), /schemaVersion must be 6/);
 });
 
 test('rejects duplicate and malformed ids', () => {
@@ -223,4 +223,46 @@ test('session 6e privacy: no BBL, address, owner or lot fields anywhere in commi
   walk(new URL('../../public/assets/maps/', import.meta.url));
   assert.ok(files.length >= 5 && files.some((f) => f.pathname.endsWith('public/assets/maps/jackson-heights.json')));
   for (const f of files) assert.deepEqual(privacyProblems(JSON.parse(readFileSync(f, 'utf8'))), [], f.pathname);
+});
+
+test('session 6f: bike docks at real stations (snapped tiles only), well-formed, cited, inside the walk area, no overlaps', () => {
+  const bd = real.bikeDocks;
+  assert.ok(bd.docks.length >= 20, `${bd.docks.length} docks`);
+  assert.equal(bd.bikesAtStart, 3); // owner's decision 3
+  assert.ok(bd.slots >= bd.bikesAtStart);
+  assert.match(bd.feed, /^https:\/\/.+station_information\.json$/);
+  assert.match(bd.fetched, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(real.sources.some((s) => s.id === bd.sources[0] && s.url === bd.feed && s.accessed === bd.fetched));
+  for (const d of bd.docks) assert.deepEqual(Object.keys(d), ['station', 'label', 'tile', 'size']);
+  expectError((d) => (d.bikeDocks.docks[0].lat = 40.75), /unexpected field "lat"/);
+  expectError((d) => (d.bikeDocks.docks[0].lat = 40.75), /privacy: field "lat"/);
+  expectError((d) => (d.bikeDocks.docks[0].address = 'x'), /privacy: field "address"/);
+  expectError((d) => (d.bikeDocks.docks[0].size = [3, 1]), /size \(the footprint in tiles\) must be/);
+  expectError((d) => d.bikeDocks.docks.push({ ...d.bikeDocks.docks[0], station: 'other' }), /overlaps bikeDocks.docks\[0\]/);
+  expectError((d) => d.bikeDocks.docks.push({ ...d.bikeDocks.docks[0] }), /duplicate station/);
+  expectError((d) => (d.bikeDocks.docks[0].tile = [10000, 0]), /outside the walkable area/);
+  expectError((d) => (d.bikeDocks.docks[0].label = 'somewhere'), /corner label/);
+  expectError((d) => (d.bikeDocks.sources = ['nope']), /bikeDocks: unknown source "nope"/);
+  expectError((d) => delete d.bikeDocks, /bikeDocks: must be an object/);
+});
+
+test('session 6f branding: no bike-share operator or sponsor name in the game\'s code, strings or art (data provenance in tools/, docs and the dataset\'s sources only)', () => {
+  const NAMES = /citi\s*bike|citibike|citigroup|\blyft\b/i;
+  const root = new URL('../../src/', import.meta.url);
+  const hits = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(new URL(`${e.name}/`, dir));
+      else if (!dir.pathname.endsWith('/src/data/world/')) {
+        const text = readFileSync(new URL(e.name, dir), 'utf8');
+        if (NAMES.test(text)) hits.push(new URL(e.name, dir).pathname);
+      }
+    }
+  };
+  walk(root);
+  for (const f of ['../../index.html', '../../public/assets/maps/jackson-heights.json']) if (NAMES.test(readFileSync(new URL(f, import.meta.url), 'utf8'))) hits.push(f);
+  assert.deepEqual(hits, []);
+  // In the dataset the names appear only in the feed's source entry and URL.
+  const outside = JSON.stringify({ ...real, sources: real.sources.filter((s) => s.id !== real.bikeDocks.sources[0]), bikeDocks: { ...real.bikeDocks, feed: '' } });
+  assert.ok(!NAMES.test(outside));
 });

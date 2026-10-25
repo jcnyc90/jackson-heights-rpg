@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildMaps, decodeLayer, SHOP_WORDS } from '../../scripts/generate-maps.mjs';
+import { buildMaps, decodeLayer, FEATURES, SHOP_WORDS } from '../../scripts/generate-maps.mjs';
 import { mapBoxes, tileOf } from '../../scripts/world-layout.mjs';
 import { WALK_LIMITS } from '../../scripts/validate-world.mjs';
 
@@ -69,7 +69,7 @@ test('deterministic: two runs give identical maps', () => {
 });
 
 test('Tiled conventions: layers (tile layers base64 + zlib), the embedded tileset from tiles.json, objects with their properties', () => {
-  assert.deepEqual(json.layers.map((l) => [l.name, l.type]), [['ground', 'tilelayer'], ['collision', 'tilelayer'], ['props', 'tilelayer'], ['objects', 'objectgroup'], ['npcs', 'objectgroup'], ['buildings', 'objectgroup'], ['labels', 'objectgroup'], ['corners', 'objectgroup'], ['zones', 'objectgroup']]);
+  assert.deepEqual(json.layers.map((l) => [l.name, l.type]), [['ground', 'tilelayer'], ['collision', 'tilelayer'], ['props', 'tilelayer'], ['objects', 'objectgroup'], ['npcs', 'objectgroup'], ['buildings', 'objectgroup'], ['labels', 'objectgroup'], ['corners', 'objectgroup'], ['zones', 'objectgroup'], ...(FEATURES.bikeDocks ? [['docks', 'objectgroup']] : [])]);
   for (const l of json.layers.filter((x) => x.type === 'tilelayer')) {
     assert.deepEqual([l.encoding, l.compression], ['base64', 'zlib'], l.name);
     assert.equal(decodeLayer(l.data).length, W * H, l.name);
@@ -269,7 +269,7 @@ test('the committed map matches a fresh generation, layer by layer (npm run maps
     const a = decodeLayer(committed.layers.find((l) => l.name === name).data);
     assert.deepEqual(a, layers[name], name);
   }
-  for (const name of ['objects', 'npcs', 'buildings', 'labels', 'corners', 'zones']) {
+  for (const name of ['objects', 'npcs', 'buildings', 'labels', 'corners', 'zones', ...(FEATURES.bikeDocks ? ['docks'] : [])]) {
     const strip = (objs) => objs.map((o) => [o.type, o.x, o.y, o.width ?? 0, o.height ?? 0, JSON.stringify(o.properties ?? [])]);
     assert.deepEqual(strip(committed.layers.find((l) => l.name === name).objects), strip(layer(name).objects), name);
   }

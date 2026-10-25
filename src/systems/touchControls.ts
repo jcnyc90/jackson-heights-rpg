@@ -1,4 +1,4 @@
-import { DIRECTIONS_8, type Direction8 } from '../config';
+import { DIRECTIONS_8, FEATURES, type Direction8 } from '../config';
 
 /** Touch input state, written by DOM pointer events and read by Controls each frame. */
 export const touchState = {
@@ -6,13 +6,26 @@ export const touchState = {
   /** Counts thumbstick presses (new pointer down), so a lock can tell a held press from a new one. */
   stickPresses: 0,
   actionQueued: false,
+  /** The speed button pressed since the last read (session 6f), or null. */
+  speedQueued: null as number | null,
   /** Returns true once per action-button press. */
   takeAction(): boolean {
     const queued = this.actionQueued;
     this.actionQueued = false;
     return queued;
   },
+  /** Returns the speed level (0-3) once per speed-button press, else null. */
+  takeSpeed(): number | null {
+    const queued = this.speedQueued;
+    this.speedQueued = null;
+    return queued;
+  },
 };
+
+/** Highlights the speed button of `level` (the setting holds until another is pressed; owner's decision 5). */
+export function showSpeed(level: number): void {
+  for (const b of document.querySelectorAll<HTMLElement>('.speed-btn')) b.classList.toggle('on', Number(b.dataset.level) === level);
+}
 
 // The thumbstick (session 6d, replacing the D-pad): a round base and a knob that follows the
 // thumb, up to KNOB_TRAVEL of the base's radius from the centre. The direction snaps to one of
@@ -36,8 +49,8 @@ function isTouchDevice(): boolean {
 }
 
 /**
- * Wires the on-screen thumbstick and action button declared in index.html. They are only
- * shown (via the `touch` class on <html>) on touch devices, or after the first touch.
+ * Wires the on-screen thumbstick, action button and (session 6f) speed buttons declared in index.html. They
+ * are only shown (via the `touch` class on <html>) on touch devices, or after the first touch.
  */
 export function initTouchControls(): void {
   const stick = document.getElementById('stick');
@@ -101,6 +114,18 @@ export function initTouchControls(): void {
   });
   for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
     action.addEventListener(type, () => action.classList.remove('pressed'));
+  }
+
+  // Speed buttons (session 6f): shown when the flag is on; a press queues the level for Controls.
+  if (FEATURES.speedButtons) {
+    document.documentElement.classList.add('speed');
+    document.getElementById('speed-row')?.removeAttribute('hidden');
+    for (const b of document.querySelectorAll<HTMLElement>('.speed-btn')) {
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        touchState.speedQueued = Number(b.dataset.level);
+      });
+    }
   }
 
   // Never leave a direction held if the page loses focus mid-press.

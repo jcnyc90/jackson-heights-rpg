@@ -12,7 +12,16 @@
       <div id="game"></div>
       <!-- On-screen controls: hidden unless the device has touch (see src/systems/touchControls.ts). -->
       <div id="touch-controls" aria-hidden="true">
-        <div id="stick"><div id="stick-knob"></div></div>
+        <div id="stick-col">
+          <div id="stick"><div id="stick-knob"></div></div>
+          <!-- Speed buttons (session 6f, owner's decision 5): x1, x2, x4, x8; shown when the speedButtons flag is on. -->
+          <div id="speed-row" hidden>
+            <div class="speed-btn" data-level="0">%t:speed.0%</div>
+            <div class="speed-btn" data-level="1">%t:speed.1%</div>
+            <div class="speed-btn" data-level="2">%t:speed.2%</div>
+            <div class="speed-btn" data-level="3">%t:speed.3%</div>
+          </div>
+        </div>
         <div id="action-btn"></div>
       </div>
     </main>

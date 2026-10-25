@@ -7,7 +7,7 @@ import json, math, sys
 
 WORLD = sys.argv[1] if len(sys.argv) > 1 else 'src/data/world/jackson-heights.json'
 w = json.load(open(WORLD))
-assert w['schemaVersion'] == 5
+assert w['schemaVersion'] in (5, 6)  # 6: session 6f's bikeDocks (re-run tools/derive_6f_docks.py after a layout change)
 
 # Owner's decisions 2 and 3: 30 tiles per short east-west block; a straight walk from 31st Ave to the
 # southern edge in 45 s or less at 150 px/s (6750 px = 421.9 tiles). Corridors keep 6d's widths
@@ -83,6 +83,8 @@ for i, k in enumerate(order):
         body = '[\n' + ',\n'.join('    ' + dump(e) for e in v) + '\n  ]'
     elif k == 'trees':
         body = '{\n' + ',\n'.join(f'    {dump(a)}: {dump(b)}' for a, b in v.items()) + '\n  }'
+    elif k == 'bikeDocks':  # session 6f (tools/derive_6f_docks.py): one dock per line
+        body = '{\n' + ',\n'.join(f'    {dump(a)}: ' + ('[\n' + ',\n'.join('      ' + dump(e) for e in b) + '\n    ]' if a == 'docks' else dump(b)) for a, b in v.items()) + '\n  }'
     elif isinstance(v, dict):
         body = json.dumps(v, indent=2, ensure_ascii=False).replace('\n', '\n  ')
     else:

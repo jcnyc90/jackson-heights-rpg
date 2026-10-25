@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "id": "jackson-heights",
   "bounds": {
     "description": "Session 6d (owner's decision: two avenues north of Northern Blvd; east-west bounds stay 73rd-90th St). West 73rd St, east 90th St, north 31st Ave (LION 26C: 32nd Ave and 31st Ave are the first two avenues north of Northern Blvd, each crossing every numbered street from 73rd to 90th St), south Roosevelt Ave plus the station triangle down to Broadway at 74th-75th St. Grid: x = 0 at 73rd St, +1 per numbered street east; y = 0 at 37th Ave, -1 35th Ave, -2 34th Ave, -3 Northern Blvd, -4 32nd Ave, -5 31st Ave, 1 37th Rd, 2 Roosevelt Ave; fractions for Broadway and the streets meeting Roosevelt from the south. Distances are stylized; only order and topology are real. Streets that continue past the bounds (node \"continues\", each with the first LION segment beyond) are drawn running to the map edge.",
@@ -105,7 +105,8 @@
     {"id": "nypd-advisory-2023-06", "title": "Weekend Traffic Advisory Friday, June 2nd - Monday, June 5th (2023): Queens Pride Parade & Festival", "url": "https://www.nyc.gov/site/nypd/news/tr0069/weekend-traffic-advisory-friday-june-2nd---monday-june-5th", "publisher": "NYPD", "accessed": "2026-10-23", "access": "read", "usedFor": "Formation 89th St between 35th Ave and Roosevelt Ave; route listed as 37th Ave between 79th St and 89th St; dispersal 75th St between 37th Ave and Roosevelt Ave; festival 76th St (37th Ave to Roosevelt Ave) and 37th Rd (74th to 77th St)."},
     {"id": "cbs-queens-pride-2026", "title": "Queens Pride Parade 2026 steps off today (route map, street closures)", "url": "https://www.cbsnews.com/newyork/news/queens-pride-parade-2026-guide/", "publisher": "CBS New York", "accessed": "2026-10-23", "access": "read", "usedFor": "2026 route '37th Avenue from 89th Street to 75th Street' and DOT-announced closures: 89th St (35th Ave to Roosevelt Ave), 37th Ave (89th to 75th St), 75th St and 75th-76th St (37th Ave to Roosevelt Ave), 37th Rd (74th to 77th St). News report quoting NYC DOT; read through a page extract."},
     {"id": "dot-34ave-open-street", "title": "34th Avenue Open Street", "url": "https://www.nyc.gov/34ave", "publisher": "NYC Department of Transportation", "accessed": "2026-10-23", "access": "read", "usedFor": "34th Avenue as a pedestrian street: DOT is making 34th Ave between 69th and 96th St the city's first permanent Open Street (capital project; design 2026-2028, construction later). The page also names the Alliance for Paseo Park (founded 2023). nyc.gov/34ave redirects to https://www.nyc.gov/html/dot/html/about/34ave.shtml."},
-    {"id": "dot-projects-2025", "title": "NYC DOT Current Projects 2025: 34th Avenue Open Street, 69th Street to Junction Boulevard", "url": "https://www.nyc.gov/html/dot/html/about/projects-2025.shtml#34ave", "publisher": "NYC Department of Transportation", "accessed": "2026-10-23", "access": "read", "usedFor": "34th Avenue as built: the 2022-2023 1.3 mile transformation made it a pedestrian and cyclist priority corridor (shared streets, vehicle diverters, plaza blocks), with two more plaza blocks in 2024-2025."}
+    {"id": "dot-projects-2025", "title": "NYC DOT Current Projects 2025: 34th Avenue Open Street, 69th Street to Junction Boulevard", "url": "https://www.nyc.gov/html/dot/html/about/projects-2025.shtml#34ave", "publisher": "NYC Department of Transportation", "accessed": "2026-10-23", "access": "read", "usedFor": "34th Avenue as built: the 2022-2023 1.3 mile transformation made it a pedestrian and cyclist priority corridor (shared streets, vehicle diverters, plaza blocks), with two more plaza blocks in 2024-2025."},
+    {"id": "gbfs-bike-share", "title": "Citi Bike GBFS 2.3 station_information (public feed, operated by Lyft)", "version": "fetched 2026-10-25T20:17:22Z", "url": "https://gbfs.lyft.com/gbfs/2.3/bkn/en/station_information.json", "publisher": "Lyft Bikes and Scooters, LLC (Citi Bike system data)", "accessed": "2026-10-25", "access": "read", "terms": "Citi Bike Data License Agreement (https://citibikenyc.com/data-sharing-policy): use and modification in a product allowed; no stand-alone redistribution, no use of its names or marks, no implied endorsement. The game is not affiliated with the system and shows generic \"Bike Share\" branding.", "usedFor": "Session 6f (owner's decision 1: a one-time exception to the NYC-Open-Data-only rule, for station positions only): bike-share dock positions, snapped to map tiles. Only station ids, corner labels and snapped tiles are committed; no coordinates."}
   ],
   "streets": [
     {"id": "st-73", "name": "73rd Street", "orientation": "ns", "sources": ["dcp-lion"], "confidence": "high", "status": "verified"},
@@ -1130,5 +1131,41 @@
   "deviations": [
     {"id": "dev-paseo-grass", "subject": "area-34th-avenue-plaza", "game": "Grassy green surface, car-free and continuous (owner's decision 9).", "reality": "Asphalt street with planters, plaza blocks and shared-street blocks (DOT 34th Avenue Open Street)."},
     {"id": "dev-paseo-bike-lanes", "subject": "area-34th-avenue-plaza", "game": "A green painted bike lane along both sides of every block, 73rd to 90th St (owner's decision 9).", "reality": "DOT Bike Routes list a current facility on every block (protected, conventional or shared, per direction); blocks marked deviation in bikeLanes have no dedicated lane in both directions in the data."}
-  ]
+  ],
+  "bikeDocks": {
+    "sources": ["gbfs-bike-share"],
+    "feed": "https://gbfs.lyft.com/gbfs/2.3/bkn/en/station_information.json",
+    "fetched": "2026-10-25",
+    "slots": 4,
+    "bikesAtStart": 3,
+    "description": "Bike-share docks at the real station positions inside the walkable area (session 6f, owner's decisions 1-3). Each: the station's GBFS station_id, its corner label as the feed names it, the snapped tile (top-left of the dock, in layout tile coordinates like trees.tiles) and its size [width, height] in tiles: a kiosk plus `slots` bike slots in a row along a curb, the paseo's bike lane or a plaza edge. Regenerate with tools/derive_6f_docks.py.",
+    "docks": [
+      {"station": "1828966626550010820", "label": "77 St & 31 Ave", "tile": [108, -293], "size": [5, 1]},
+      {"station": "1851947582840610924", "label": "31 Ave & 84 St", "tile": [318, -293], "size": [5, 1]},
+      {"station": "1828968611856235508", "label": "31 Ave & 86 St", "tile": [397, -280], "size": [5, 1]},
+      {"station": "1828968462257099768", "label": "32 Ave & 84 St", "tile": [318, -244], "size": [5, 1]},
+      {"station": "1828966363527611286", "label": "32 Ave & 75 St", "tile": [48, -244], "size": [5, 1]},
+      {"station": "1838618090943186984", "label": "32 Ave & 77 St", "tile": [127, -244], "size": [5, 1]},
+      {"station": "1828967607558607844", "label": "32 Ave & 81 St", "tile": [228, -244], "size": [5, 1]},
+      {"station": "1828969112306680612", "label": "90 St & 32 Ave", "tile": [513, -227], "size": [1, 5]},
+      {"station": "1828968327357059242", "label": "85 St & Northern Blvd", "tile": [356, -193], "size": [1, 5]},
+      {"station": "1828966490867110420", "label": "75 St & Northern Blvd", "tile": [63, -162], "size": [1, 5]},
+      {"station": "1869754143518014264", "label": "78 St & Northern Blvd", "tile": [155, -162], "size": [1, 5]},
+      {"station": "1828967717120678322", "label": "81 St & 34 Ave", "tile": [236, -133], "size": [1, 5]},
+      {"station": "2009671276352543716", "label": "34 Ave & 83 St", "tile": [307, -122], "size": [5, 1]},
+      {"station": "1834145204469569922", "label": "34 Ave & 74 St", "tile": [37, -122], "size": [5, 1]},
+      {"station": "1856766912456610780", "label": "34 Ave & 89 St", "tile": [487, -115], "size": [5, 1]},
+      {"station": "1828968199249922252", "label": "86 St & 35 Ave", "tile": [393, -75], "size": [1, 5]},
+      {"station": "1838617691511229014", "label": "81 St & 35 Ave", "tile": [236, -75], "size": [1, 5]},
+      {"station": "1836581807397045112", "label": "75 St & 35 Ave", "tile": [63, -50], "size": [1, 5]},
+      {"station": "1834145330979754058", "label": "74 St & 37 Ave", "tile": [33, -15], "size": [1, 5]},
+      {"station": "1836581441921155232", "label": "79 St & 37 Ave", "tile": [176, 10], "size": [1, 5]},
+      {"station": "1828968082192898522", "label": "86 St & 37 Ave", "tile": [386, 10], "size": [1, 5]},
+      {"station": "1846085256331594490", "label": "75 St & Roosevelt Ave", "tile": [63, 87], "size": [1, 5]},
+      {"station": "1836581628905160976", "label": "Elmhurst Ave & Roosevelt Ave", "tile": [513, 56], "size": [1, 5]},
+      {"station": "1828967830172187422", "label": "84 St & Roosevelt Ave", "tile": [333, 56], "size": [1, 5]},
+      {"station": "1828967979464708718", "label": "87 St & Roosevelt Ave", "tile": [416, 56], "size": [1, 5]},
+      {"station": "1843486189591985058", "label": "79 St & Roosevelt Ave", "tile": [168, 83], "size": [5, 1]}
+    ]
+  }
 }

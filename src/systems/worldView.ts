@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import tileIds from '../data/tiles.json';
-import { FONT, GAME_HEIGHT, GAME_WIDTH, TEXTURES, TILE_SIZE } from '../config';
+import { FONT, GAME_HEIGHT, GAME_WIDTH, PLAYER_SPEED, TEXTURES, TILE_SIZE } from '../config';
 import type { WorldBuilding, WorldData } from './mapLoader';
-import type { MapInfo, StreetSign } from './maps';
+import type { DockRect, MapInfo, StreetSign } from './maps';
 import { t } from './strings';
 import { PROP_FRAME, PROP_NAMES, PROPS_TEXTURE, buildingTexture, signPanel } from './worldArt';
 
@@ -11,20 +11,36 @@ import { PROP_FRAME, PROP_NAMES, PROPS_TEXTURE, buildingTexture, signPanel } fro
 // - Ground and collision: one tilemap "window" of WINDOW tiles around the camera, refilled from the
 //   decoded arrays whenever the camera nears its edge. The collision layer is invisible; the player
 //   collides with it (Arcade), so walls never have seams between chunks.
-// - Buildings, props and signs: sprites created per BIN x BIN-tile bin near the camera, destroyed
+// - Buildings, props, signs and bike-share docks (6f): sprites created per BIN x BIN-tile bin near the camera, destroyed
 //   once it's far away. Depth = their foot's y, like characters, so the player passes in front of
 //   and behind them (owner's decision 1).
 
 const WINDOW = { width: 48, height: 40 } as const;
-/** Re-anchor the window when the camera's view gets this close to its edge (tiles). */
-const WINDOW_SLACK = 4;
+/**
+ * Re-anchor the window when the camera's view gets this close to its edge (tiles). Session 6f: 6 (was 4), more than
+ * twice the farthest a frame moves (riding x8: 2400 px/s = 2.5 tiles a frame at 60 fps); the window is also kept
+ * around the player after every physics step (keepWindow), so collision never runs past its edge in a long frame.
+ */
+const WINDOW_SLACK = 6;
 const BIN = 32;
-/** Bins within this many tiles of the view are built; beyond DROP they're destroyed. */
+/**
+ * Bins within BUILD_MARGIN tiles of the view are built ahead of time, up to BINS_PER_FRAME a frame; beyond DROP
+ * they're destroyed. Session 6f: above walking speed both grow with the speed (buildAhead), so bins are built
+ * before they come into view at up to x8 riding; walking at x1 keeps 6e's values.
+ */
 const BUILD_MARGIN = 24;
 const DROP_MARGIN = 48;
 const SIGN_PAD = 2;
 /** Bins built per frame beyond the visible ones (spreads texture painting over frames). */
 const BINS_PER_FRAME = 1;
+/** Frames of travel the build margin covers ahead at speed (session 6f). */
+const AHEAD_FRAMES = 8;
+
+/** The build margin (tiles) and bins built a frame at `speed` px/s: 6e's 24 and 1 up to walking speed. */
+export function buildAhead(speed: number): { margin: number; perFrame: number } {
+  const extra = Math.max(0, speed - PLAYER_SPEED);
+  return { margin: Math.min(DROP_MARGIN - 4, BUILD_MARGIN + Math.ceil(((extra / 60) * AHEAD_FRAMES) / TILE_SIZE)), perFrame: BINS_PER_FRAME + Math.ceil(extra / 600) };
+}
 /** Building textures kept painted at most (529 looks on the map, ~22 MB if all were kept); least recently used go first. */
 const MAX_BUILDING_TEXTURES = 160;
 const SOLID_ID = tileIds.tiles.indexOf('solid');
@@ -41,6 +57,7 @@ interface Bin {
   buildings: WorldBuilding[];
   props: number[];
   signs: StreetSign[];
+  docks: DockRect[];
 }
 
 export class WorldView {
@@ -53,14 +70,20 @@ export class WorldView {
   private readonly binCols: number;
   private readonly live = new Map<number, Phaser.GameObjects.GameObject[]>();
   private frame = 0;
+  /** The docked-bike sprites of every live dock, by dock id (redrawn when a count changes). */
+  private readonly dockBikes = new Map<string, Phaser.GameObjects.Image[]>();
   /** How many times the window was refilled (the browser checks read it). */
   refills = 0;
+  /** Bins built on the frame they came within a few tiles of the view instead of ahead of time (6f: the browser checks read it). */
+  urgentBuilds = 0;
 
   constructor(
     private readonly scene: Phaser.Scene,
     info: MapInfo,
     private readonly world: WorldData,
     depths: { ground: number; collision: number },
+    /** Bikes docked at a dock right now (session 6f: gameState). */
+    private readonly bikesAt: (dockId: string) => number = () => 0,
   ) {
     this.map = scene.make.tilemap({ tileWidth: TILE_SIZE, tileHeight: TILE_SIZE, width: WINDOW.width, height: WINDOW.height });
     const tiles = this.map.addTilesetImage(TEXTURES.tiles, TEXTURES.tiles, TILE_SIZE, TILE_SIZE, 0, 0, 0);
@@ -74,19 +97,31 @@ export class WorldView {
     // Bins: every building (by its image's bottom centre), prop and sign (by their foot).
     this.binCols = Math.ceil(world.width / BIN);
     const rows = Math.ceil(world.height / BIN);
-    for (let i = 0; i < this.binCols * rows; i++) this.bins.push({ buildings: [], props: [], signs: [] });
+    for (let i = 0; i < this.binCols * rows; i++) this.bins.push({ buildings: [], props: [], signs: [], docks: [] });
     const binOf = (tx: number, ty: number) => Math.floor(Phaser.Math.Clamp(ty, 0, world.height - 1) / BIN) * this.binCols + Math.floor(Phaser.Math.Clamp(tx, 0, world.width - 1) / BIN);
     for (const b of world.buildings) this.bins[binOf(b.x + b.w / 2, b.y + b.h - 1)].buildings.push(b);
     for (let k = 0; k < world.props.length; k++) if (PROP_FRAME_OF.has(world.props[k])) this.bins[binOf(k % world.width, Math.floor(k / world.width))].props.push(k);
     for (const s of info.signs) this.bins[binOf(s.x / TILE_SIZE, s.y / TILE_SIZE - 1)].signs.push(s);
+    for (const d of info.docks) this.bins[binOf(d.x / TILE_SIZE, d.y / TILE_SIZE)].docks.push(d);
   }
 
   /**
    * Keeps the window and the sprite bins around the view centred on (x, y) map pixels (the player:
    * the camera follows them). Call every frame; it's cheap when nothing changes.
    */
-  update(x: number, y: number, force = false): void {
-    const v = { x0: (x - GAME_WIDTH / 2) / TILE_SIZE, y0: (y - GAME_HEIGHT / 2) / TILE_SIZE, x1: (x + GAME_WIDTH / 2) / TILE_SIZE, y1: (y + GAME_HEIGHT / 2) / TILE_SIZE };
+  update(x: number, y: number, force = false, speed = PLAYER_SPEED): void {
+    this.keepWindow(x, y, force);
+    this.updateBins(this.viewAt(x, y), speed, force);
+  }
+
+  /** The view (in tiles) when the camera centres on (x, y) map pixels. */
+  private viewAt(x: number, y: number): { x0: number; y0: number; x1: number; y1: number } {
+    return { x0: (x - GAME_WIDTH / 2) / TILE_SIZE, y0: (y - GAME_HEIGHT / 2) / TILE_SIZE, x1: (x + GAME_WIDTH / 2) / TILE_SIZE, y1: (y + GAME_HEIGHT / 2) / TILE_SIZE };
+  }
+
+  /** Re-anchors the ground and collision window if the view centred on (x, y) is within WINDOW_SLACK of its edge. Cheap otherwise. */
+  keepWindow(x: number, y: number, force = false): void {
+    const v = this.viewAt(x, y);
     const a = this.anchor;
     // A side only needs slack where the window doesn't already reach the map's edge there.
     const W = this.world.width, H = this.world.height;
@@ -100,7 +135,6 @@ export class WorldView {
       const cy = Math.floor((v.y0 + v.y1) / 2);
       this.fill(Phaser.Math.Clamp(cx - WINDOW.width / 2, 0, Math.max(0, this.world.width - WINDOW.width)), Phaser.Math.Clamp(cy - WINDOW.height / 2, 0, Math.max(0, this.world.height - WINDOW.height)));
     }
-    this.updateBins(v);
   }
 
   /** Refills both window layers from the map arrays, with the window's top-left at tile (ax, ay). */
@@ -130,22 +164,24 @@ export class WorldView {
     this.refills++;
   }
 
-  private updateBins(v: { x0: number; y0: number; x1: number; y1: number }): void {
+  private updateBins(v: { x0: number; y0: number; x1: number; y1: number }, speed: number, force: boolean): void {
     const range = (m: number) => ({
       bx0: Math.max(0, Math.floor((v.x0 - m) / BIN)), by0: Math.max(0, Math.floor((v.y0 - m) / BIN)),
       bx1: Math.min(this.binCols - 1, Math.floor((v.x1 + m) / BIN)), by1: Math.min(Math.ceil(this.world.height / BIN) - 1, Math.floor((v.y1 + m) / BIN)),
     });
     this.frame = ++frameCounter;
-    // Bins the view touches (plus a few tiles) are built now; the rest of the margin one a frame.
+    // Bins the view touches (plus a few tiles) are built now; the rest of the margin a few a frame.
+    const ahead = buildAhead(speed);
     const now = range(4);
-    const build = range(BUILD_MARGIN);
-    let budget = BINS_PER_FRAME;
+    const build = range(ahead.margin);
+    let budget = ahead.perFrame;
     for (let by = build.by0; by <= build.by1; by++) for (let bx = build.bx0; bx <= build.bx1; bx++) {
       const id = by * this.binCols + bx;
       if (this.live.has(id)) continue;
       const urgent = bx >= now.bx0 && bx <= now.bx1 && by >= now.by0 && by <= now.by1;
       if (!urgent && budget <= 0) continue;
       if (!urgent) budget--;
+      else if (!force) this.urgentBuilds++;
       this.live.set(id, this.buildBin(this.bins[id]));
     }
     const keep = range(DROP_MARGIN);
@@ -154,6 +190,7 @@ export class WorldView {
       const bx = id % this.binCols, by = Math.floor(id / this.binCols);
       if (bx < keep.bx0 || bx > keep.bx1 || by < keep.by0 || by > keep.by1) {
         for (const o of objs) o.destroy();
+        for (const d of this.bins[id].docks) this.dockBikes.delete(d.dockId);
         this.live.delete(id);
         dropped = true;
       }
@@ -200,7 +237,49 @@ export class WorldView {
       out.push(s.add.image(i * T + T / 2, (j + 1) * T, PROPS_TEXTURE, PROP_FRAME_OF.get(this.world.props[k])).setOrigin(0.5, 1).setDepth((j + 1) * T));
     }
     for (const sign of bin.signs) out.push(...this.addSign(sign));
+    for (const d of bin.docks) out.push(...this.addDock(d));
     return out;
+  }
+
+  /**
+   * A bike-share dock (session 6f): the kiosk on its first tile (west or north end), a rack slot on each
+   * other tile, and a docked bike in the first slots, as many as it holds. Each sprite sorts by its own
+   * tile's foot y, like props.
+   */
+  private addDock(d: DockRect): Phaser.GameObjects.GameObject[] {
+    const s = this.scene;
+    const T = TILE_SIZE;
+    const across = d.width > d.height;
+    const tile = (n: number) => ({ x: d.x + (across ? n * T : 0) + T / 2, y: d.y + (across ? 0 : n * T) + T });
+    const out: Phaser.GameObjects.GameObject[] = [];
+    const k = tile(0);
+    out.push(s.add.image(k.x, k.y, PROPS_TEXTURE, PROP_NAMES.indexOf('dock-kiosk')).setOrigin(0.5, 1).setDepth(k.y));
+    for (let n = 1; n <= d.slots; n++) {
+      const p = tile(n);
+      out.push(s.add.image(p.x, p.y, PROPS_TEXTURE, PROP_NAMES.indexOf(across ? 'dock-rack-h' : 'dock-rack-v')).setOrigin(0.5, 1).setDepth(p.y));
+    }
+    const bikes: Phaser.GameObjects.Image[] = [];
+    for (let n = 1; n <= d.slots; n++) {
+      const p = tile(n);
+      bikes.push(s.add.image(p.x, p.y, PROPS_TEXTURE, PROP_NAMES.indexOf(across ? 'bike-h' : 'bike-v')).setOrigin(0.5, 1).setDepth(p.y + 0.01));
+    }
+    this.dockBikes.set(d.dockId, bikes);
+    this.refreshDock(d.dockId);
+    return [...out, ...bikes];
+  }
+
+  /** Shows as many docked bikes as the dock holds now (call after renting or returning one). */
+  refreshDock(dockId: string): void {
+    const bikes = this.dockBikes.get(dockId);
+    if (!bikes) return;
+    const n = this.bikesAt(dockId);
+    bikes.forEach((b, i) => b.setVisible(i < n));
+  }
+
+  /** How many docked bikes are drawn at a dock (null when its bin isn't built). The browser checks read it. */
+  bikesShown(dockId: string): number | null {
+    const bikes = this.dockBikes.get(dockId);
+    return bikes ? bikes.filter((b) => b.visible).length : null;
   }
 
   /**
@@ -230,6 +309,16 @@ export class WorldView {
     return out;
   }
 
+  /** Bins overlapping a rectangle (map pixels, e.g. the camera's view) that aren't built: the browser checks count them (must be 0). */
+  unbuiltIn(x: number, y: number, w: number, h: number): number {
+    const T = TILE_SIZE;
+    let n = 0;
+    for (let by = Math.max(0, Math.floor(y / T / BIN)); by <= Math.min(Math.ceil(this.world.height / BIN) - 1, Math.floor((y + h - 1) / T / BIN)); by++) {
+      for (let bx = Math.max(0, Math.floor(x / T / BIN)); bx <= Math.min(this.binCols - 1, Math.floor((x + w - 1) / T / BIN)); bx++) if (!this.live.has(by * this.binCols + bx)) n++;
+    }
+    return n;
+  }
+
   /** Live sprites (the browser checks count them). */
   liveObjects(): number {
     let n = 0;
@@ -240,6 +329,7 @@ export class WorldView {
   destroy(): void {
     for (const objs of this.live.values()) for (const o of objs) o.destroy();
     this.live.clear();
+    this.dockBikes.clear();
     this.map.destroy();
   }
 }
