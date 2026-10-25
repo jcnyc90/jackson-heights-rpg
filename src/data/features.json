@@ -1,6 +1,6 @@
 {
-  "description": "Feature flags (session 6f). New systems are built behind these and switched on together in the session's last stage. bikeDocks: scripts/generate-maps.mjs places the bike-share docks of the world dataset on the map (prop markers, collision, the 'docks' layer). riding: Action at a dock rents or returns a bike (src/scenes/MapScene.ts). speedButtons: the 0/1/2/3 speed buttons and keys.",
-  "bikeDocks": false,
-  "riding": false,
-  "speedButtons": false
+  "description": "Feature flags (session 6f). New systems were built behind these and switched on together in the session's last stage (all on since 6f's stage 5). bikeDocks: scripts/generate-maps.mjs places the bike-share docks of the world dataset on the map (prop markers, collision, the 'docks' layer). riding: Action at a dock rents or returns a bike (src/scenes/MapScene.ts). speedButtons: the 0/1/2/3 speed buttons and keys.",
+  "bikeDocks": true,
+  "riding": true,
+  "speedButtons": true
 }

@@ -1043,7 +1043,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     } else {
       const layer = (name) => json.layers.find((l) => l.name === name).objects;
       const countOf = (type) => layer('objects').filter((o) => o.type === type).length;
-      console.log(`[maps] ${id}.json: ${json.width}x${json.height} tiles, ${countOf('spawn')} spawn, ${countOf('deliveryPoint')} delivery points, ${stats.buildings} buildings ${JSON.stringify(stats.kinds)}, ${stats.trees}/${stats.treesInData} trees placed, ${stats.signs} corner signs, ${stats.edgeSigns} edge signs, ${stats.corners} corners, ${layer('zones').length} zone areas (${Date.now() - t0} ms)`);
+      console.log(`[maps] ${id}.json: ${json.width}x${json.height} tiles, ${countOf('spawn')} spawn, ${countOf('deliveryPoint')} delivery points, ${stats.buildings} buildings ${JSON.stringify(stats.kinds)}, ${stats.trees}/${stats.treesInData} trees placed, ${stats.signs} corner signs, ${stats.edgeSigns} edge signs, ${stats.corners} corners, ${layer('zones').length} zone areas, ${stats.docks} bike docks (${Date.now() - t0} ms)`);
     }
   }
   if (check) {
