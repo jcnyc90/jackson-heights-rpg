@@ -7,5 +7,7 @@ logs/
 .env.*
 # Local Claude Code / editor tooling
 .claude/
+.antigravity/
+.gemini/
 .vscode/
 .idea/

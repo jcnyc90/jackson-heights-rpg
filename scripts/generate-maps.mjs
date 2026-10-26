@@ -53,7 +53,10 @@ const PILLAR_EVERY = 15;
 const LAMP_EVERY = 12; // Claude's choice
 const TREE_GAP = 4;
 // Generic category words a storefront's sign panel may show (t() keys shop.*); only on commercial faces.
-export const SHOP_WORDS = ['bakery', 'grocery', 'pharmacy', 'laundry', 'deli', 'florist', 'hardware', 'salon', 'cafe', 'electronics'];
+export const SHOP_WORDS = [
+  'bakery', 'grocery', 'pharmacy', 'laundry', 'deli', 'florist', 'hardware', 'salon', 'cafe', 'electronics',
+  'restaurant', 'bank', 'bar', 'clothes', 'optician', 'jewelry', 'books', 'clinic', 'dentist', 'travel',
+];
 // Their English lengths: a sign panel takes a word only where it fits whole (worldView leaves the
 // panel blank in a language whose word is longer).
 const EN_STRINGS = JSON.parse(readFileSync(join(ROOT, 'src/data/strings/en.json'), 'utf8'));
@@ -419,11 +422,27 @@ export function buildMaps(world, opts = {}) {
   };
   const kindOf = (use) => ({ commercial: 'storefront', walkup: 'walkup', 'garden-coop': 'coop', civic: 'civic', house: 'house' })[use] ?? 'walkup';
   // A word only where it fits the panel whole (6 px a letter; the panel spans the front minus a side face); else blank.
-  const signFor = (use, i, j, w, side) => {
+  // Session 6g: when OSM businesses are snapped to this corridor's north face, use the nearest fitting business category.
+  const bizByFace = new Map();
+  for (const bz of world.businesses ?? []) {
+    const key = `${bz.segment}/${bz.side}`;
+    if (!bizByFace.has(key)) bizByFace.set(key, []);
+    bizByFace.get(key).push(bz);
+  }
+  const signFor = (use, gi, i, j, w, side) => {
     if (use !== 'commercial' || hash(i, j, 11) % 3 !== 0) return '';
-    const word = SHOP_WORDS[hash(i, j, 13) % SHOP_WORDS.length];
     const span = (w - (side === '-' ? 0 : 1)) * T - 6;
-    return EN_LENGTHS[word] * 6 <= span ? word : '';
+    const fits = (word) => SHOP_WORDS.includes(word) && EN_LENGTHS[word] * 6 <= span;
+    const geo = geos[gi];
+    const seg = geo?.segment ?? geo?.from;
+    const faceBiz = seg ? bizByFace.get(`${seg.id}/north`) : null;
+    if (faceBiz?.length && geo.bx !== geo.ax) {
+      const bt = Math.max(0, Math.min(1, (i + w / 2 - geo.ax) / (geo.bx - geo.ax)));
+      const near = [...faceBiz].filter((bz) => fits(bz.sign)).sort((a, b) => Math.abs(a.t - bt) - Math.abs(b.t - bt))[0];
+      if (near && Math.abs(near.t - bt) <= 0.35) return near.sign;
+    }
+    const word = SHOP_WORDS[hash(i, j, 13) % SHOP_WORDS.length];
+    return fits(word) ? word : '';
   };
 
   /** A row of buildings along a band (front s or n), x from x0 to x1, image rows [y, y + h). */
@@ -469,7 +488,7 @@ export function buildMaps(world, opts = {}) {
       if (x1 - x - w < 3) w = x1 - x; // no slivers: the last building takes the rest
       const side = x === x0 && sideW ? 'w' : x + w === x1 && sideE ? 'e' : '-';
       fillSolid(x, y, w, h);
-      addBuilding({ x, y, w, h, kind, front, roof, side, door: Math.floor(w / 2) - (hash(x, y, 4) % 2), gi, variant: hash(x, y, 21) % 4, sign: front === 's' ? signFor(use, x, y, w, side) : '' });
+      addBuilding({ x, y, w, h, kind, front, roof, side, door: Math.floor(w / 2) - (hash(x, y, 4) % 2), gi, variant: hash(x, y, 21) % 4, sign: front === 's' ? signFor(use, gi, x, y, w, side) : '' });
       x += w;
     }
   };
@@ -568,14 +587,30 @@ export function buildMaps(world, opts = {}) {
       const dE = Eg !== null ? (both ? w - dW : Math.min(w, 9)) : 0;
       if (garden) {
         const ring = Math.min(7, Math.floor(w / 3));
-        columnRow('w', 'garden-coop', Wg ?? N ?? S, x0, ring, my0, my1);
-        columnRow('e', 'garden-coop', Eg ?? N ?? S, x1 - ring, ring, my0, my1);
-        // The interior garden: lawn, paths and trees; private, so it stays solid.
+        // Session 6g: walkable game-placed entry gates on the west and east sides of each garden-coop
+        // block so the player can walk from the side-street sidewalks into the interior courtyard garden.
+        const gateH = 2;
+        const gateY = Math.floor((my0 + my1 - gateH) / 2);
+        const gateTop = gateY - my0 >= 4 && my1 - (gateY + gateH) >= 4;
+        if (gateTop) {
+          columnRow('w', 'garden-coop', Wg ?? N ?? S, x0, ring, my0, gateY);
+          columnRow('w', 'garden-coop', Wg ?? N ?? S, x0, ring, gateY + gateH, my1);
+          columnRow('e', 'garden-coop', Eg ?? N ?? S, x1 - ring, ring, my0, gateY);
+          columnRow('e', 'garden-coop', Eg ?? N ?? S, x1 - ring, ring, gateY + gateH, my1);
+          fillOpen(x0, gateY, ring, gateH, 'park-path');
+          fillOpen(x1 - ring, gateY, ring, gateH, 'park-path');
+        } else {
+          columnRow('w', 'garden-coop', Wg ?? N ?? S, x0, ring, my0, my1);
+          columnRow('e', 'garden-coop', Eg ?? N ?? S, x1 - ring, ring, my0, my1);
+        }
+        // The interior courtyard garden: walkable lawn, paths, flowers and trees.
         for (let j = my0; j < my1; j++) for (let i = x0 + ring; i < x1 - ring; i++) {
           const k = idx(i, j);
-          ground[k] = GID[(i - x0 - ring) % 6 === 3 || (j - my0) % 8 === 4 ? 'park-path' : hash(i, j, 6) % 9 ? 'garden' : 'flowers'];
-          solid[k] = 1;
-          if ((i + j) % 5 === 0 && hash(i, j, 1) % 2 === 0 && ground[k] === GID.garden) props[k] = GID['p-tree'];
+          const isGateRow = gateTop && j >= gateY && j < gateY + gateH;
+          ground[k] = GID[isGateRow || (i - x0 - ring) % 6 === 3 || (j - my0) % 8 === 4 ? 'park-path' : hash(i, j, 6) % 9 ? 'garden' : 'flowers'];
+          solid[k] = 0;
+          cls[k] = OPEN;
+          if (!isGateRow && (i + j) % 5 === 0 && hash(i, j, 1) % 2 === 0 && ground[k] === GID.garden) putProp(i, j, 'p-tree');
         }
       } else {
         if (dW) columnRow('w', uses.W, Wg, x0, Math.min(dW, 9), my0, my1);

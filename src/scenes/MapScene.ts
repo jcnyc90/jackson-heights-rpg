@@ -397,6 +397,7 @@ export class MapScene extends Phaser.Scene {
    */
   private applyRider(): void {
     const riding = this.state.riding;
+    this.world?.setRiding(riding);
     const key = riding ? TEXTURES.rider : TEXTURES.player;
     if (this.player.texture.key !== key) {
       this.player.anims.stop();

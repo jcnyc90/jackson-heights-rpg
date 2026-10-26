@@ -44,10 +44,80 @@ export function buildAhead(speed: number): { margin: number; perFrame: number } 
 /** Building textures kept painted at most (529 looks on the map, ~22 MB if all were kept); least recently used go first. */
 const MAX_BUILDING_TEXTURES = 160;
 const SOLID_ID = tileIds.tiles.indexOf('solid');
+/**
+ * Ground tile ids a bike may ride on (Session 6g owner decision: roads, green bike lanes, crosswalks,
+ * and pedestrian plazas, plus intersection crossings and dock approach tiles built in buildRideable).
+ * Regular sidewalks, park interiors, and Historic District co-op courtyards require dismounting.
+ */
+const RIDEABLE_GROUND = new Set(
+  [
+    'road',
+    'road-marking',
+    'center-line-n',
+    'center-line-s',
+    'lane-dash-n',
+    'lane-dash-s',
+    'el-shadow',
+    'manhole',
+    'crosswalk-ns',
+    'crosswalk-ew',
+    'bike-lane',
+    'plaza',
+  ].map((name) => tileIds.tiles.indexOf(name)),
+);
+const PASEO_MEDIAN = new Set(['paseo-grass', 'flowers'].map((name) => tileIds.tiles.indexOf(name)));
 // Props-layer tile id -> frame of the props sheet (the sheet's extra frames, like the sign post, aren't map tiles).
 const PROP_FRAME_OF = new Map<number, number>(PROP_NAMES.flatMap((name, i) => (tileIds.tiles.includes(name) ? [[tileIds.tiles.indexOf(name), i] as [number, number]] : [])));
 
 export const SIGN_COLOURS = { blade: 0x2f6b4f, edge: 0xff5d5d } as const;
+
+/**
+ * Builds the 0/1 mask of map tiles reachable on a bike (Session 6g owner decision):
+ * - Roads, green bike lanes (34th Ave Paseo), crosswalks, and pedestrian plazas.
+ * - Street intersection crossings (so north-south streets cross the 34th Ave Paseo and connect its north/south bike lanes,
+ *   and plazas connect across intersection curbs without allowing regular sidewalks or paseo grass outside crossings).
+ * - The 1-tile approach ring around each bike dock (so every dock can be mounted and dismounted from the road/lane/plaza).
+ */
+export function buildRideable(info: MapInfo, world: WorldData): Uint8Array {
+  const W = world.width, H = world.height;
+  const out = new Uint8Array(W * H);
+  for (let k = 0; k < W * H; k++) {
+    if (!world.solid[k] && RIDEABLE_GROUND.has(world.ground[k])) out[k] = 1;
+  }
+  const SIDEWALK_W = 3;
+  for (const c of info.corners) {
+    const x0 = Math.floor(c.x / TILE_SIZE), y0 = Math.floor(c.y / TILE_SIZE);
+    const x1 = Math.floor((c.x + c.width) / TILE_SIZE), y1 = Math.floor((c.y + c.height) / TILE_SIZE);
+    for (let j = y0; j < y1; j++) {
+      for (let i = x0 + SIDEWALK_W; i < x1 - SIDEWALK_W; i++) {
+        const k = j * W + i;
+        if (i >= 0 && j >= 0 && i < W && j < H && !world.solid[k]) out[k] = 1;
+      }
+    }
+    for (let j = y0 + SIDEWALK_W; j < y1 - SIDEWALK_W; j++) {
+      for (let i = x0; i < x1; i++) {
+        const k = j * W + i;
+        if (i >= 0 && j >= 0 && i < W && j < H && !world.solid[k] && !PASEO_MEDIAN.has(world.ground[k])) out[k] = 1;
+      }
+    }
+  }
+  for (const d of info.docks) {
+    const x0 = Math.floor(d.x / TILE_SIZE), y0 = Math.floor(d.y / TILE_SIZE);
+    const x1 = Math.floor((d.x + d.width) / TILE_SIZE), y1 = Math.floor((d.y + d.height) / TILE_SIZE);
+    for (let j = y0 - 1; j <= y1; j++) {
+      for (let i = x0 - 1; i <= x1; i++) {
+        const k = j * W + i;
+        if (i >= 0 && j >= 0 && i < W && j < H && !world.solid[k]) out[k] = 1;
+      }
+    }
+  }
+  for (const sp of info.spawns) {
+    const i = Math.floor(sp.x / TILE_SIZE), j = Math.floor((sp.y - 1) / TILE_SIZE);
+    const k = j * W + i;
+    if (i >= 0 && j >= 0 && i < W && j < H && !world.solid[k]) out[k] = 1;
+  }
+  return out;
+}
 
 /** Painted building texture keys by last use (shared by every WorldView: textures outlive a scene restart). */
 const textureUse = new Map<string, number>();
@@ -72,6 +142,9 @@ export class WorldView {
   private frame = 0;
   /** The docked-bike sprites of every live dock, by dock id (redrawn when a count changes). */
   private readonly dockBikes = new Map<string, Phaser.GameObjects.Image[]>();
+  /** 0/1 mask of tiles open to a bike (Session 6g: roads, green bike lanes, crosswalks, plazas, crossings, dock approaches). */
+  private readonly rideable: Uint8Array;
+  private riding = false;
   /** How many times the window was refilled (the browser checks read it). */
   refills = 0;
   /** Bins built on the frame they came within a few tiles of the view instead of ahead of time (6f: the browser checks read it). */
@@ -93,6 +166,7 @@ export class WorldView {
     if (!ground || !collision) throw new Error('Could not create the world map window');
     this.ground = ground.setDepth(depths.ground);
     this.collision = collision.setDepth(depths.collision).setVisible(false);
+    this.rideable = buildRideable(info, world);
 
     // Bins: every building (by its image's bottom centre), prop and sign (by their foot).
     this.binCols = Math.ceil(world.width / BIN);
@@ -137,6 +211,19 @@ export class WorldView {
     }
   }
 
+  /** True when tile (tx, ty) is open to a bike (road, green bike lane, crosswalk, plaza, crossing or dock approach). */
+  canRideAt(tx: number, ty: number): boolean {
+    if (tx < 0 || ty < 0 || tx >= this.world.width || ty >= this.world.height) return false;
+    return this.rideable[ty * this.world.width + tx] === 1;
+  }
+
+  /** Switches the collision window between walking (all walkable tiles) and riding (roads, bike lanes, crosswalks, plazas, and dock approaches). */
+  setRiding(riding: boolean): void {
+    if (this.riding === riding) return;
+    this.riding = riding;
+    if (!Number.isNaN(this.anchor.x)) this.fill(this.anchor.x, this.anchor.y);
+  }
+
   /** Refills both window layers from the map arrays, with the window's top-left at tile (ax, ay). */
   private fill(ax: number, ay: number): void {
     this.anchor = { x: ax, y: ay };
@@ -150,8 +237,9 @@ export class WorldView {
       for (let i = 0; i < WINDOW.width; i++) {
         const k = row + ax + i;
         const inside = ax + i < w.width && ay + j < w.height;
+        const blocked = inside && (w.solid[k] !== 0 || (this.riding && !this.rideable[k]));
         gr.push(inside ? w.ground[k] : -1);
-        cr.push(inside && w.solid[k] ? SOLID_ID : -1);
+        cr.push(blocked ? SOLID_ID : -1);
       }
       g.push(gr);
       c.push(cr);

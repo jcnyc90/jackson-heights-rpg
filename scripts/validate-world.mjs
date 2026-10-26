@@ -70,6 +70,7 @@ export function validateWorld(data) {
   for (const old of ['connections', 'mapConnections']) if (old in data) err(`${old}: retired in schema 4 (one continuous map, no warps or walls)`);
   const anchors = collect('anchors');
   const landmarks = collect('landmarks', false);
+  const businesses = collect('businesses', false);
 
   for (const s of sources.values()) {
     if (typeof s.title !== 'string' || s.title === '') err(`source "${s.id}": needs a title`);
@@ -235,9 +236,10 @@ export function validateWorld(data) {
   }
 
   for (const lm of landmarks.values()) {
-    if (lm.fictional !== true) err(`landmark "${lm.id}": must have "fictional": true (real businesses stay out; DESIGN.md 1, #5)`);
+    if (lm.fictional !== undefined && typeof lm.fictional !== 'boolean') err(`landmark "${lm.id}": fictional, if set, must be a boolean`);
     if (!zones.has(lm.zone)) err(`landmark "${lm.id}": unknown zone "${lm.zone}"`);
-    if (typeof lm.placeholder !== 'string' || lm.placeholder === '') err(`landmark "${lm.id}": needs a placeholder label`);
+    const label = lm.name ?? lm.placeholder;
+    if (typeof label !== 'string' || label === '') err(`landmark "${lm.id}": needs a name or placeholder label`);
   }
 
   // Anchor ids become deliveryPoint pointIds, so they're unique across the whole dataset.
@@ -361,37 +363,30 @@ export function validateWorld(data) {
       }
     });
   }
-  for (const p of privacyProblems(data)) err(p);
+  // ---- session 6g: OSM local businesses snapped to street segments (chains genericized) ----
+  for (const bz of businesses.values()) {
+    const s = segments.get(bz.segment);
+    if (!s) err(`business "${bz.id}": unknown segment "${bz.segment}"`);
+    const orientation = streets.get(s?.street)?.orientation;
+    if (orientation && !SIDES[orientation].includes(bz.side)) err(`business "${bz.id}": side must be one of ${SIDES[orientation].join(', ')} on this street`);
+    if (typeof bz.t !== 'number' || !(bz.t >= 0 && bz.t <= 1)) err(`business "${bz.id}": t must be a number from 0 to 1`);
+    if (typeof bz.name !== 'string' || bz.name === '') err(`business "${bz.id}": needs a name`);
+    if (typeof bz.category !== 'string' || bz.category === '') err(`business "${bz.id}": needs a category`);
+    if (typeof bz.chain !== 'boolean') err(`business "${bz.id}": chain must be a boolean`);
+    if (bz.address !== undefined && (typeof bz.address !== 'string' || bz.address === '')) err(`business "${bz.id}": address, if set, must be a non-empty string`);
+    cite(`business "${bz.id}"`, bz.sources);
+  }
   for (const sid of sources.keys()) if (!cited.has(sid) && sources.get(sid).role !== 'licence') warnings.push(`source "${sid}" is cited by no fact`);
 
   return { errors, warnings, unverified };
 }
 
 /**
- * Privacy rules for committed data (session 6e): no tax-lot or person fields (BBL, address, owner,
- * lot geometry), no BBL-like 10-digit numbers and no house numbers ("12-34 56 St"). Walks every key
- * and value of any parsed JSON. Returns one message per hit (empty when clean).
+ * Privacy check disabled in Session 6g per owner directive (personal learning project:
+ * real addresses, BBLs, coordinates, and real local businesses are permitted in src/data/**).
  */
-export function privacyProblems(value) {
-  const KEYS = /^(bbl|bin|address|addr|housenum|house_?number|owner|ownername|lot|lotgeom|lotgeometry|block|borocode|zipcode|zip|footprint|latitude|longitude|lat|lon|lng)$/i;
-  const BBL = /\b[1-5]\d{9}\b/;
-  const HOUSE = /\b\d{1,3}-\d{2}[A-Z]?\s+\d{1,3}(st|nd|rd|th)?\s+(st|street|ave|avenue|av|rd|road|pl|place|blvd)\b/i;
-  const hits = [];
-  const walk = (v, path) => {
-    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${path}[${i}]`));
-    if (v !== null && typeof v === 'object') {
-      for (const [k, x] of Object.entries(v)) {
-        if (KEYS.test(k)) hits.push(`privacy: field "${k}" at ${path}`);
-        walk(x, `${path}.${k}`);
-      }
-      return;
-    }
-    const s = String(v);
-    if (BBL.test(s)) hits.push(`privacy: BBL-like number at ${path}`);
-    if (HOUSE.test(s)) hits.push(`privacy: house number at ${path}`);
-  };
-  walk(value, '$');
-  return hits;
+export function privacyProblems(_value) {
+  return [];
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -408,7 +403,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const stations = Array.isArray(data.transit) ? data.transit.filter((t) => t.kind === 'station').length : 0;
   const zoned = new Set((Array.isArray(data.zones) ? data.zones : []).flatMap((z) => z.segments ?? []));
   const continuing = Array.isArray(data.nodes) ? data.nodes.reduce((n, x) => n + (x.continues?.length ?? 0), 0) : 0;
-  console.log(`[world] ${file}: ${count('zones')} zones, ${count('maps')} map, ${count('streets')} streets, ${count('nodes')} nodes, ${count('segments')} segments (${zoned.size} in zones), ${continuing} street ends running past the bounds, ${stations} stations, ${count('areas')} areas, ${count('anchors')} anchors, ${count('landmarks')} landmarks, ${count('blockFaces')} block faces, ${count('parks')} parks, ${data.trees?.tiles?.length ?? 0} trees, ${count('bikeLanes')} bike-lane blocks, ${data.bikeDocks?.docks?.length ?? 0} bike docks, ${count('sources')} sources`);
+  console.log(`[world] ${file}: ${count('zones')} zones, ${count('maps')} map, ${count('streets')} streets, ${count('nodes')} nodes, ${count('segments')} segments (${zoned.size} in zones), ${continuing} street ends running past the bounds, ${stations} stations, ${count('areas')} areas, ${count('anchors')} anchors, ${count('landmarks')} landmarks, ${count('businesses')} businesses, ${count('blockFaces')} block faces, ${count('parks')} parks, ${data.trees?.tiles?.length ?? 0} trees, ${count('bikeLanes')} bike-lane blocks, ${data.bikeDocks?.docks?.length ?? 0} bike docks, ${count('sources')} sources`);
   for (const w of warnings) console.log(`[world] warning: ${w}`);
   console.log(`[world] facts not both verified and high confidence: ${unverified.length}`);
   for (const u of unverified) console.log(`[world]   ${u}`);

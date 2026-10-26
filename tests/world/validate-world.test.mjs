@@ -126,10 +126,15 @@ test('anchors: zone, segment, side, position, uses, one dispatcher', () => {
   assert.ok(validateWorld(d).warnings.includes('zone "northern-blvd" has no pickup or dropoff anchor'));
 });
 
-test("landmarks must be marked fictional, sit in the anchor's zone and at one anchor only", () => {
-  expectError((d) => (byId(d.landmarks, 'lm-food-a').fictional = false), /landmark "lm-food-a": must have "fictional": true/);
-  expectError((d) => (byId(d.anchors, 'rav-76-1').landmark = 'lm-shop-b'), /landmark "lm-shop-b" is in another zone/);
-  expectError((d) => (byId(d.anchors, 'plaza-73-1').landmark = 'lm-shop-b'), /landmark "lm-shop-b" is already at another anchor/);
+test("landmarks can be fictional or real local businesses, must sit in the anchor's zone and at one anchor only", () => {
+  const d = copy();
+  byId(d.landmarks, 'lm-food-a').fictional = false;
+  byId(d.landmarks, 'lm-food-a').name = 'Phayul';
+  byId(d.landmarks, 'lm-food-a').address = '37-65 74th St';
+  assert.deepEqual(validateWorld(d).errors, []);
+  expectError((d2) => (byId(d2.landmarks, 'lm-food-a').fictional = 'nope'), /landmark "lm-food-a": fictional, if set, must be a boolean/);
+  expectError((d2) => (byId(d2.anchors, 'rav-76-1').landmark = 'lm-shop-b'), /landmark "lm-shop-b" is in another zone/);
+  expectError((d2) => (byId(d2.anchors, 'plaza-73-1').landmark = 'lm-shop-b'), /landmark "lm-shop-b" is already at another anchor/);
 });
 
 test('layout: well-formed, covers every node, and fixes the map\'s tile size', () => {
@@ -201,28 +206,27 @@ test('session 6e: parks, trees (thinned tile positions), bike lanes and deviatio
   expectError((d) => (d.deviations[0].subject = 'nowhere'), /subject must be an area or a segment/);
 });
 
-test('session 6e privacy: no BBL, address, owner or lot fields anywhere in committed data (src/data and the map asset)', () => {
-  // The rules themselves.
-  assert.deepEqual(privacyProblems({ a: [{ name: 'x' }] }), []);
-  assert.equal(privacyProblems({ bbl: 1 }).length, 1);
-  assert.equal(privacyProblems({ ownername: 'x' }).length, 1);
-  assert.equal(privacyProblems({ note: 'lot 4012340056' }).length, 1);
-  assert.equal(privacyProblems({ note: 'at 12-34 56 Street' }).length, 1);
-  assert.equal(privacyProblems({ address: '' }).length, 1);
-  // Every committed JSON under src/data (the dataset, the maps, strings, orders).
-  const root = new URL('../../src/data/', import.meta.url);
-  const files = [];
-  const walk = (dir) => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      if (e.isDirectory()) walk(new URL(`${e.name}/`, dir));
-      else if (e.name.endsWith('.json') && !e.name.startsWith('.')) files.push(new URL(e.name, dir));
-    }
-  };
-  walk(root);
-  // ...and the world map asset (since 6e an external file under public/assets/maps).
-  walk(new URL('../../public/assets/maps/', import.meta.url));
-  assert.ok(files.length >= 5 && files.some((f) => f.pathname.endsWith('public/assets/maps/jackson-heights.json')));
-  for (const f of files) assert.deepEqual(privacyProblems(JSON.parse(readFileSync(f, 'utf8'))), [], f.pathname);
+test('session 6g: privacyProblems is disabled so real addresses, BBLs, coordinates and real local businesses pass validation', () => {
+  assert.deepEqual(privacyProblems({ bbl: 4012340056, bin: 4000000, address: '74-15 Roosevelt Ave', ownername: 'Example LLC', lat: 40.747, lon: -73.891 }), []);
+  const d = copy();
+  d.landmarks.push({ id: 'lm-real-test', zone: 'diversity-plaza-74th', kind: 'food', fictional: false, name: 'Test Momo Spot', address: '74-15 Roosevelt Ave', bbl: '4012340056', lat: 40.747, lon: -73.891 });
+  assert.deepEqual(validateWorld(d).errors, []);
+});
+
+test('session 6g: OSM businesses snapped to street segments, real local businesses kept, national chains genericized, landmarks wired', () => {
+  assert.ok(Array.isArray(real.businesses) && real.businesses.length >= 350, `${real.businesses?.length} businesses`);
+  const local = real.businesses.filter((b) => !b.chain);
+  const chains = real.businesses.filter((b) => b.chain);
+  const GENERIC = new Set(['Bakery', 'Grocery', 'Deli', 'Pharmacy', 'Laundry', 'Florist', 'Hardware', 'Salon', 'Coffee Shop', 'Electronics', 'Restaurant', 'Bar', 'Bank', 'Clothing Store', 'Optician', 'Jewelry', 'Book & Gift Shop', 'Clinic', 'Dentist', 'Travel Agency', 'Auto & Bike Shop', 'Service Counter', 'Shop']);
+  assert.ok(local.length >= 300, `${local.length} local businesses`);
+  assert.ok(chains.length >= 50, `${chains.length} genericized chains`);
+  assert.ok(chains.every((b) => GENERIC.has(b.name)), 'every chain uses a generic category label');
+  assert.ok(real.sources.some((s) => s.id === 'osm-overpass'));
+  assert.ok(real.landmarks.every((lm) => lm.fictional === false && typeof lm.name === 'string' && lm.name.length > 0));
+  expectError((d) => (d.businesses[0].segment = 'no-such-seg'), /unknown segment "no-such-seg"/);
+  expectError((d) => (d.businesses[0].t = 1.5), /t must be a number from 0 to 1/);
+  expectError((d) => (d.businesses[0].name = ''), /needs a name/);
+  expectError((d) => (d.businesses[0].chain = 'yes'), /chain must be a boolean/);
 });
 
 test('session 6f: bike docks at real stations (snapped tiles only), well-formed, cited, inside the walk area, no overlaps', () => {
@@ -235,8 +239,6 @@ test('session 6f: bike docks at real stations (snapped tiles only), well-formed,
   assert.ok(real.sources.some((s) => s.id === bd.sources[0] && s.url === bd.feed && s.accessed === bd.fetched));
   for (const d of bd.docks) assert.deepEqual(Object.keys(d), ['station', 'label', 'tile', 'size']);
   expectError((d) => (d.bikeDocks.docks[0].lat = 40.75), /unexpected field "lat"/);
-  expectError((d) => (d.bikeDocks.docks[0].lat = 40.75), /privacy: field "lat"/);
-  expectError((d) => (d.bikeDocks.docks[0].address = 'x'), /privacy: field "address"/);
   expectError((d) => (d.bikeDocks.docks[0].size = [3, 1]), /size \(the footprint in tiles\) must be/);
   expectError((d) => d.bikeDocks.docks.push({ ...d.bikeDocks.docks[0], station: 'other' }), /overlaps bikeDocks.docks\[0\]/);
   expectError((d) => d.bikeDocks.docks.push({ ...d.bikeDocks.docks[0] }), /duplicate station/);

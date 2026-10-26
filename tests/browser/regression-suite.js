@@ -995,7 +995,7 @@ try {
         [q1, pickNo, afterNo, q2, pickYes, afterYes],
         ['A Bike Share dock. Bikes here: 3. Ride one?', 1, [false, false, 3], 'A Bike Share dock. Bikes here: 3. Ride one?', 0, [false, true, 2, 2, 'rider', 300, 120, feet0, [10, 8]]]);
       // X7. Riding: 300 px/s (5 px a frame) in whole pixels on a straight free run; the ride animation plays.
-      let runRow = null; for (let ty = startT[1] - 30; ty < startT[1] + 30 && !runRow; ty++) for (let tx = startT[0] - 40; tx < startT[0] + 20 && !runRow; tx++) { let ok = true; for (let k2 = -1; k2 < 25 && ok; k2++) ok = GW.open(tx + k2, ty) && GW.open(tx + k2, ty - 1) && GW.open(tx + k2, ty + 1); if (ok) runRow = [tx, ty]; }
+      let runRow = null; for (let ty = startT[1] - 30; ty < startT[1] + 30 && !runRow; ty++) for (let tx = startT[0] - 40; tx < startT[0] + 20 && !runRow; tx++) { let ok = true; for (let k2 = -1; k2 < 25 && ok; k2++) ok = GW.open(tx + k2, ty) && GW.open(tx + k2, ty - 1) && GW.open(tx + k2, ty + 1) && s.world.canRideAt(tx + k2, ty); if (ok) runRow = [tx, ty]; }
       feetAt(...runRow); const rx0 = s.player.x; const ry0 = s.player.y; const xs = holdKeys(['ArrowRight'], 60);
       check('X7 riding speed: 300 px/s = 5 px a frame (after the first, as input acts on the next step: 59 frames = 295 px), whole pixels every frame, straight; the ride animation plays',
         [xs.at(-1)[0] - xs[0][0], xs[0][0] - rx0, xs.every(([x, y]) => Number.isInteger(x) && y === ry0), xs.slice(1).every(([x], i) => x - xs[i][0] === 5), s.player.anims.currentAnim?.key], [295, 0, true, true, 'rider-ride-right']);
@@ -1016,14 +1016,45 @@ try {
       const farDock = [...wi.docks].sort(byDist).at(-1); faceDock(farDock); const farCount = s.world.bikesShown(farDock.dockId);
       faceDock(hDock); const backCount = s.world.bikesShown(hDock.dockId);
       check('X9 dock counts: live per dock (the rented one shows 2 after its bin was dropped and rebuilt), others untouched (3)', [farCount, backCount, s.state.bikesAt(hDock.dockId)], [3, 2, 2]);
-      // X10. Delivery while riding (Claude's choice: doors and NPCs work as on foot): Order #1 end to end on the bike, along pathfound routes.
+      // X10. Bike surface restriction (Session 6g owner decision: bikes ride only on roads, green bike lanes, crosswalks,
+      // and plazas plus dock approaches; regular sidewalks, park lawns, and co-op courtyards require dismounting) and Order #1 with a bike.
       const ride = {};
-      { const dsp = s.npcs.find((n) => n.spawn.role === 'dispatcher'); const dT = tileAt(dsp.spawn.x, dsp.spawn.y);
-        const sp = facingSpot(grid(WORLD_MAP), ...dT, tileAt(s.player.x, s.player.y)); ride.toDispatcher = walkPath(sp.path); s.facing = sp.facing;
-        ride.dispatcher = talkAll().includes('Order #1 is ready'); ride.leg1 = goFace(o1.pickup).ok; ride.pickup = talkAll();
-        ride.leg2 = goFace(o1.dropoff).ok; ride.deliver = talkAll(); ride.after = [s.state.riding, s.state.completed, s.player.texture.key]; }
-      check('X10 an order completes while riding: the Dispatcher, the pickup door and the dropoff door all work from the bike',
-        ride, { toDispatcher: true, dispatcher: true, leg1: true, pickup: `You picked up Order #1. Bring it to ${placeOf(Dp)}. | `, leg2: true, deliver: 'You delivered Order #1. Nice work! | ', after: [true, ['order-1'], 'rider'] });
+      {
+        const Gride = { ...GW, open: (tx, ty) => GW.open(tx, ty) && s.world.canRideAt(tx, ty) };
+        feetAt(C80 + 10, R37 - 6); holdKeys(['ArrowUp'], 20);
+        ride.blockedBySidewalkCurb = [s.player.body.y === (R37 - 6) * 16, !s.world.canRideAt(C80 + 10, R37 - 7)];
+        feetAt(x79 + 8, R34 - 5); const p0 = s.player.x; holdKeys(['ArrowRight'], 12);
+        ride.paseoBikeLane = [s.player.x > p0, s.world.canRideAt(x79 + 8, R34 - 5), !s.world.canRideAt(x79 + 8, R34 - 8), !s.world.canRideAt(x79 + 8, R34)];
+        let gardenRide = 0, lawnRide = 0;
+        for (let ty = wy0; ty < wy1; ty++) for (let tx = wx0; tx < wx1; tx++) {
+          const g2 = groundName(tx, ty);
+          if (g2 === 'garden' && s.world.canRideAt(tx, ty)) gardenRide++;
+          if ((g2 === 'lawn' || g2 === 'lawn-dark') && s.world.canRideAt(tx, ty)) lawnRide++;
+        }
+        ride.noParksOrCourtyards = [gardenRide, lawnRide];
+        // Dismount at hDock to walk on the sidewalk to the Dispatcher, then rent again and ride to o1.pickup on Diversity Plaza.
+        faceDock(hDock); ask(); press(); run(FRAME);
+        const dsp = s.npcs.find((n) => n.spawn.role === 'dispatcher'); const dT = tileAt(dsp.spawn.x, dsp.spawn.y);
+        const sp = facingSpot(GW, ...dT, tileAt(s.player.x, s.player.y)); ride.toDispatcher = walkPath(sp.path); s.facing = sp.facing;
+        ride.dispatcher = talkAll().includes('Order #1 is ready');
+        faceDock(hDock); ask(); press(); run(FRAME);
+        const [px1, py1] = pointTile(o1.pickup.map, o1.pickup.pointId);
+        const spPick = facingSpot(Gride, px1, py1, tileAt(s.player.x, s.player.y));
+        ride.leg1 = walkPath(spPick.path); s.facing = spPick.facing;
+        ride.pickup = talkAll();
+        // Ride on the street network to the dock nearest o1.dropoff, return the bike to dismount onto the sidewalk, and deliver.
+        const [dx2, dy2] = pointTile(o1.dropoff.map, o1.dropoff.pointId);
+        const dropDock = [...wi.docks].sort((a, b) => Math.hypot(a.x / 16 - dx2, a.y / 16 - dy2) - Math.hypot(b.x / 16 - dx2, b.y / 16 - dy2))[0];
+        const dStand = standAt(dropDock);
+        const toDock = bfs(Gride, tileAt(s.player.x, s.player.y), (t) => t[0] === dStand[0] && t[1] === dStand[1]);
+        ride.toDropDock = walkPath(toDock); s.facing = FACE[dropDock.open]; run(FRAME);
+        ask(); press(); run(FRAME); // return bike to walk onto the sidewalk
+        ride.leg2 = goFace(o1.dropoff).ok; ride.deliver = talkAll();
+        faceDock(dropDock); ask(); press(); run(FRAME); // remount for X11
+        ride.after = [s.state.riding, s.state.completed, s.player.texture.key];
+      }
+      check('X10 bike surface rule (roads, green bike lanes, crosswalks, plazas only; dismount for sidewalks, parks, courtyards) and Order #1 with a bike',
+        ride, { blockedBySidewalkCurb: [true, true], paseoBikeLane: [true, true, true, true], noParksOrCourtyards: [0, 0], toDispatcher: true, dispatcher: true, leg1: true, pickup: `You picked up Order #1. Bring it to ${placeOf(Dp)}. | `, toDropDock: true, leg2: true, deliver: 'You delivered Order #1. Nice work! | ', after: [true, ['order-1'], 'rider'] });
       // X11. The ride survives a scene restart (state in gameState), then reset puts the player back on foot.
       s.scene.restart({}); run(100); const afterRestart = [s.player.texture.key, s.physics.world.fps, s.player.body.width];
       s.state.reset(); s.scene.restart({}); run(100);
@@ -1053,14 +1084,15 @@ try {
     check('Y1 speed keys 0-3 (and keypad) and buttons: x1/x2/x4/x8 of walking (150 px/s) or riding (300), physics steps scaled to match; the pressed one stays lit and holds until another press',
       y1, { key0: [0, 150, 60, [0]], key1: [1, 300, 120, [1]], key2: [2, 600, 240, [2]], key3: [3, 1200, 480, [3]], numpad1: [1, 300, 120, [1]], tap2: [2, 600, 240, [2]], tap3: [3, 1200, 480, [3]],
         afterWalk: [3, 1200, 480, [3]], afterRestart: [3, 1200, 480, [3]], riding: [3, 2400, 960, [3]], riding0: [0, 300, 120, [0]], walking0: [0, 150, 60, [0]] });
-    // A long free road row (for straight runs at speed) and a long facade (for sliding).
-    let longRow = null; for (let ty = wy0 + 20; ty < wy0 + 200 && !longRow; ty++) for (let tx = wx0 + 2; tx < wx0 + 60 && !longRow; tx++) { let ok = true; for (let k2 = 0; k2 < 140 && ok; k2++) ok = GW.open(tx + k2, ty); if (ok) longRow = [tx, ty]; }
+    // A long free road row (for straight runs at speed), a long sidewalk facade (for walking wall-slide), and a long curb wall (for riding wall-slide).
+    let longRow = null; for (let ty = wy0 + 20; ty < wy0 + 200 && !longRow; ty++) for (let tx = wx0 + 2; tx < wx0 + 60 && !longRow; tx++) { let ok = true; for (let k2 = 0; k2 < 140 && ok; k2++) ok = GW.open(tx + k2, ty) && s.world.canRideAt(tx + k2, ty); if (ok) longRow = [tx, ty]; }
     let facade = null; for (let ty = R37 - 60; ty < R37 + 60 && !facade; ty++) for (let tx = C80 - 120; tx < C80 + 120 && !facade; tx++) { let ok = true; for (let k2 = 0; k2 < 18 && ok; k2++) ok = GW.open(tx + k2, ty) && !GW.open(tx + k2, ty - 1) && WD.buildings.some((b) => tx + k2 >= b.x && tx + k2 < b.x + b.w && ty - 1 >= b.y && ty - 1 < b.y + b.h); if (ok) facade = [tx, ty]; }
+    let rideFacade = null; for (let ty = R37 - 60; ty < R37 + 60 && !rideFacade; ty++) for (let tx = C80 - 120; tx < C80 + 120 && !rideFacade; tx++) { let ok = true; for (let k2 = 0; k2 < 18 && ok; k2++) ok = GW.open(tx + k2, ty) && s.world.canRideAt(tx + k2, ty) && !s.world.canRideAt(tx + k2, ty - 1); if (ok && [...Array(18).keys()].some((k2) => [...Array(9).keys()].every((r2) => GW.open(tx + k2, ty + r2) && s.world.canRideAt(tx + k2, ty + r2)))) rideFacade = [tx, ty]; }
     // Per physics step: the largest move on either axis, and any overlap of the feet box with a solid tile of the full map, an NPC or the walk edge.
     const stepLog = { max: 0, bad: 0, steps: 0, last: null };
     const npcHit = () => s.npcs.some((n) => { const a = s.player.body, b = n.sprite.body; return a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y; });
     const inWalkB = () => { const b = s.player.body, w = wi.walk; return b.x >= w.x && b.y >= w.y && b.right <= w.x + w.width && b.bottom <= w.y + w.height; };
-    const solidHit = () => { const b = s.player.body, e = 0.01; for (let ty = Math.floor(b.y / 16); ty <= Math.floor((b.y + b.height - e) / 16); ty++) for (let tx = Math.floor(b.x / 16); tx <= Math.floor((b.x + b.width - e) / 16); tx++) if (WD.solid[ty * WD.width + tx]) return true; return false; };
+    const solidHit = () => { const b = s.player.body, e = 0.01; for (let ty = Math.floor(b.y / 16); ty <= Math.floor((b.y + b.height - e) / 16); ty++) for (let tx = Math.floor(b.x / 16); tx <= Math.floor((b.x + b.width - e) / 16); tx++) if (WD.solid[ty * WD.width + tx] || (s.state.riding && !s.world.canRideAt(tx, ty))) return true; return false; };
     const onStep = () => { const b = s.player.body; if (stepLog.last) stepLog.max = Math.max(stepLog.max, Math.abs(b.x - stepLog.last[0]), Math.abs(b.y - stepLog.last[1])); stepLog.last = [b.x, b.y]; stepLog.steps++; if (solidHit() || npcHit() || !inWalkB()) stepLog.bad++; };
     const watchSteps = (on) => { stepLog.last = null; s.physics.world[on ? 'on' : 'off']('worldstep', onStep); };
     // Y2. Each speed, walking and riding: a straight run east moves base/60 x 2^level px a frame (whole pixels), in physics steps of at most 3 px.
@@ -1087,24 +1119,25 @@ try {
     R['Y3 info: x8 fuzz (bad steps / largest step px / steps), walking and riding'] = `${fw.join(' / ')}; ${fr.join(' / ')}`;
     check('Y3 no tunneling at x8 walking and x8 riding: after every physics step of 30 random runs each, the feet box overlaps no solid tile, NPC or the walk edge; no step over 4 px',
       [fw[0], fw[1] <= 4, fw[2] > 5000, fr[0], fr[1] <= 4, fr[2] > 10000], [0, true, true, 0, true, true]);
-    // Y4. Wall sliding at every speed: up-right along a building front (the longest straight one is 18 tiles: 7 frames, the
-    // last 4 measured), the player keeps full speed east and stays against the wall.
+    // Y4. Wall sliding at every speed: up-right along a building front (walking) or north curb wall (riding),
+    // the player keeps full speed east and stays against the wall.
     const y4 = {}; const y4want = {};
     for (const riding of [false, true]) for (const n of [0, 1, 2, 3]) {
-      ride(riding); keyLevel(n); at(facade[0] * 16 + 8, facade[1] * 16 + 8); run(FRAME); // feet box flush against the wall
+      const wf = riding ? rideFacade : facade;
+      ride(riding); keyLevel(n); at(wf[0] * 16 + 8, wf[1] * 16 + 8); run(FRAME); // feet box flush against the wall
       const tr = holdKeys(['ArrowUp', 'ArrowRight'], 7); const per = tr.slice(3).map(([x], i) => x - tr[i + 2][0]);
       const want = ((riding ? 300 : 150) * 2 ** n) / 60;
       const name = `${riding ? 'ride' : 'walk'}x${2 ** n}`;
-      y4[name] = [Math.abs(per.reduce((a, b) => a + b, 0) / per.length - want) <= 0.5, tr.slice(2).every(([, y]) => y === tr[2][1]), s.player.body.y === facade[1] * 16];
+      y4[name] = [Math.abs(per.reduce((a, b) => a + b, 0) / per.length - want) <= 0.5, tr.slice(2).every(([, y]) => y === tr[2][1]), s.player.body.y === wf[1] * 16];
       y4want[name] = [true, true, true];
     }
     ride(false); keyLevel(0);
     check('Y4 wall sliding at every speed, walking and riding: pressing up-right along a building front keeps full speed east, flush against the wall', y4, y4want);
     // Y5. A long frame (200 ms, the most Phaser's clock gives one frame) at x8 riding toward a wall: 80 steps, none through it; the collision window follows.
-    const col5 = [...Array(18).keys()].map((k2) => facade[0] + k2).find((tx) => [...Array(9).keys()].every((k2) => GW.open(tx, facade[1] + k2)));
-    gotoMap(WORLD_MAP, 'start'); ride(true); keyLevel(3); feetAt(col5, facade[1] + 8); run(FRAME); watchSteps(true); stepLog.bad = 0; stepLog.max = 0;
+    const col5 = [...Array(18).keys()].map((k2) => rideFacade[0] + k2).find((tx) => [...Array(9).keys()].every((k2) => GW.open(tx, rideFacade[1] + k2) && s.world.canRideAt(tx, rideFacade[1] + k2)));
+    gotoMap(WORLD_MAP, 'start'); ride(true); keyLevel(3); feetAt(col5, rideFacade[1] + 8); run(FRAME); watchSteps(true); stepLog.bad = 0; stepLog.max = 0;
     ev('keydown', 'ArrowUp'); run(FRAME); T += 200; g.step(T, 200); frames++; ev('keyup', 'ArrowUp'); run(FRAME); watchSteps(false);
-    const longFrame = [stepLog.bad, stepLog.max <= 4, s.player.body.y === facade[1] * 16];
+    const longFrame = [stepLog.bad, stepLog.max <= 4, s.player.body.y === rideFacade[1] * 16];
     T += 200; ev('keydown', 'ArrowLeft'); g.step(T, 200); frames++; ev('keyup', 'ArrowLeft'); run(FRAME);
     const a2 = s.world.anchor; const bodyT = [s.player.body.x / 16, s.player.body.y / 16];
     keyLevel(0); ride(false);

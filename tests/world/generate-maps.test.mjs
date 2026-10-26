@@ -176,6 +176,18 @@ test('houses: the footprint blocks, the lawn behind (north of) it does not, so t
   assert.ok(behind > 50, `${behind} houses with a reachable lawn behind them`);
 });
 
+test('Historic District garden co-ops: walkable interior courtyard gardens reached through game-placed entry gates', () => {
+  let gardenTiles = 0, reachedGarden = 0;
+  for (let j = WALK.y0; j < WALK.y1; j++) for (let i = WALK.x0; i < WALK.x1; i++) {
+    if (ground(i, j) === 'garden') {
+      gardenTiles++;
+      if (free(i, j) && reach[k(i, j)]) reachedGarden++;
+    }
+  }
+  assert.ok(gardenTiles > 1500, `${gardenTiles} garden tiles`);
+  assert.ok(reachedGarden > 1000, `${reachedGarden} reachable garden tiles`);
+});
+
 test('Travers Park: the whole outline is walkable lawn with paths and trees, and joins 77th St, the 78th St plaza and 34th Ave', () => {
   const park = world.parks.find((p) => p.parksId === 'Q303');
   assert.ok(park);

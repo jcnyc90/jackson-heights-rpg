@@ -118,3 +118,37 @@ test('the feature flag: with docks off the map has no docks layer and no dock ti
   assert.equal(committed.layers.some((l) => l.name === 'docks'), FEATURES.bikeDocks);
   assert.equal(decodeLayer(committed.layers.find((l) => l.name === 'props').data).some((g) => TILES.tiles[g - 1] === 'p-dock'), FEATURES.bikeDocks);
 });
+
+test('session 6g bike surface rule: all 26 docks are reachable on the restricted bike network (roads, green bike lanes, crosswalks, plazas, crossings and dock approaches), while regular sidewalks, park lawns and co-op courtyards are excluded', () => {
+  const RIDEABLE_GROUND = new Set(['road', 'road-marking', 'center-line-n', 'center-line-s', 'lane-dash-n', 'lane-dash-s', 'el-shadow', 'manhole', 'crosswalk-ns', 'crosswalk-ew', 'bike-lane', 'plaza']);
+  const PASEO_MEDIAN = new Set(['paseo-grass', 'flowers']);
+  const rideMask = new Uint8Array(W * H);
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    if (free(i, j) && RIDEABLE_GROUND.has(nameAt(layers.ground, i, j))) rideMask[k(i, j)] = 1;
+  }
+  for (const c of layer('corners').objects) {
+    const x0 = c.x / 16, y0 = c.y / 16, x1 = (c.x + c.width) / 16, y1 = (c.y + c.height) / 16;
+    for (let j = y0; j < y1; j++) for (let i = x0 + 3; i < x1 - 3; i++) if (free(i, j)) rideMask[k(i, j)] = 1;
+    for (let j = y0 + 3; j < y1 - 3; j++) for (let i = x0; i < x1; i++) if (free(i, j) && !PASEO_MEDIAN.has(nameAt(layers.ground, i, j))) rideMask[k(i, j)] = 1;
+  }
+  for (const d of docks) {
+    for (let j = d.y - 1; j <= d.y + d.h; j++) for (let i = d.x - 1; i <= d.x + d.w; i++) if (free(i, j)) rideMask[k(i, j)] = 1;
+  }
+  const start = layer('objects').objects.find((o) => o.type === 'spawn');
+  const st = [Math.floor(start.x / 16), Math.floor((start.y - 1) / 16)];
+  rideMask[k(...st)] = 1;
+  const rideReach = flood((i, j) => inWalk(i, j) && rideMask[k(i, j)] === 1);
+  for (const d of docks) {
+    const [ox, oy] = OPEN[d.open];
+    const reached = cells(d).some(([i, j]) => rideReach[k(i + ox, j + oy)] === 1);
+    assert.ok(reached, `${d.id}: reachable by bike on the restricted surface network`);
+  }
+  let gardenRide = 0, lawnRide = 0;
+  for (let j = WALK.y0; j < WALK.y1; j++) for (let i = WALK.x0; i < WALK.x1; i++) {
+    const g = nameAt(layers.ground, i, j);
+    if (g === 'garden' && rideMask[k(i, j)]) gardenRide++;
+    if ((g === 'lawn' || g === 'lawn-dark') && rideMask[k(i, j)]) lawnRide++;
+  }
+  assert.equal(gardenRide, 0, 'Historic District co-op courtyard gardens are not rideable');
+  assert.equal(lawnRide, 0, 'park lawns are not rideable');
+});
