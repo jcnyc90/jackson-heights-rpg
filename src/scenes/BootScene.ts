@@ -49,6 +49,6 @@ export class BootScene extends Phaser.Scene {
 
     // Dev builds check every warp link up front, so a typo fails at boot, not mid-game.
     if (import.meta.env.DEV) validateLinks();
-    this.scene.start('Map');
+    this.scene.start('Title');
   }
 }
