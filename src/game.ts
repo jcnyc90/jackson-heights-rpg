@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BG_COLOR, GAME_HEIGHT, GAME_WIDTH } from './config';
 import { BootScene } from './scenes/BootScene';
+import { TitleScene } from './scenes/TitleScene';
 import { DialogueScene } from './scenes/DialogueScene';
 import { MapScene } from './scenes/MapScene';
 
@@ -25,7 +26,7 @@ export function startGame(): Phaser.Game {
     },
     audio: { noAudio: true }, // no audio yet; avoids creating an AudioContext
     // Later scenes render on top: the text window draws over the map.
-    scene: [BootScene, MapScene, DialogueScene],
+    scene: [BootScene, TitleScene, MapScene, DialogueScene],
   });
   // Dev only: expose the game for poking at it from the browser console.
   if (import.meta.env.DEV) Object.assign(window, { game });

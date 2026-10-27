@@ -125,6 +125,22 @@ export class MapScene extends Phaser.Scene {
   private talkDir: Direction8 | null = null;
   /** True from stepping onto a warp until the next map has faded in. */
   private warping = false;
+  private saveTimer: number | null = null;
+
+  private saveState(): void {
+    if (this.info.id !== 'jackson-heights') return;
+    const body = this.player.body;
+    // @ts-ignore
+    this.state.save(this.info.id, body.center.x / TILE_SIZE, body.bottom / TILE_SIZE, this.facing);
+  }
+
+  private scheduleSave(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => {
+      this.saveTimer = null;
+      this.saveState();
+    }, 1000);
+  }
   /** Warps fire only after the player has stood off every warp (so arrival can't bounce back). */
   private warpArmed = false;
   /** The world map's renderer (null on bundled maps like the test map). */
@@ -135,6 +151,9 @@ export class MapScene extends Phaser.Scene {
   private cornerText: Phaser.GameObjects.BitmapText | null = null;
   /** The crossing the player stands in, as shown by the corner HUD ("78th St & 37th Ave"), or null. */
   cornerShown: string | null = null;
+  private moneyBox!: Phaser.GameObjects.Rectangle;
+  private moneyText!: Phaser.GameObjects.BitmapText;
+  private moneyShown = -1;
   private arrow!: Phaser.GameObjects.Sprite;
   private beacon!: Phaser.GameObjects.Image;
   /** Zone index + 1 per tile (0 = none), from the map's zone areas; the map's width in tiles. */
@@ -237,6 +256,11 @@ export class MapScene extends Phaser.Scene {
     this.ticketBox = this.add.rectangle(0, 0, 0, 0, HUD.box).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.ticket);
     this.ticketText = this.add.bitmapText(0, 0, FONT.key, '').setScrollFactor(0).setDepth(DEPTH.ticket + 1);
     this.refreshTicket();
+
+    this.moneyBox = this.add.rectangle(0, 0, 0, 0, HUD.box).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.nameCard);
+    this.moneyText = this.add.bitmapText(0, 0, FONT.key, '').setScrollFactor(0).setDepth(DEPTH.nameCard + 1);
+    // @ts-ignore
+    if (this.updateMoney) this.updateMoney();
 
     // The player walks inside the map's walkable area; the camera sees the whole map. On generated
     // maps the area is at least half a screen inside every edge, so the camera never stops scrolling.
@@ -475,6 +499,18 @@ export class MapScene extends Phaser.Scene {
   }
 
   /** Corner name (owner's decision 6): "78th St & 37th Ave" at the top right while the player stands in a crossing. */
+  private updateMoney(): void {
+    const amount = this.state.rewardTotal;
+    if (amount === this.moneyShown) return;
+    this.moneyShown = amount;
+
+    const text = '$' + amount;
+    // @ts-ignore
+    const r = this.hudBoxAt(2, text);
+    this.moneyBox.setPosition(r.x, r.y).setSize(r.width, r.height);
+    this.moneyText.setText(text).setPosition(r.x + HUD_BOX.pad, r.y + HUD_BOX.pad);
+  }
+
   private updateCorner(): void {
     if (!this.cornerBox || !this.cornerText) return;
     const { center, bottom } = this.player.body;
@@ -644,6 +680,7 @@ export class MapScene extends Phaser.Scene {
   }
 
   private stopWalking(): void {
+    const wasMoving = this.player?.body?.velocity.x !== 0 || this.player?.body?.velocity.y !== 0;
     this.moveDir = null;
     this.acc = { x: 0, y: 0 };
     this.planned = { x: 0, y: 0 };
@@ -651,6 +688,9 @@ export class MapScene extends Phaser.Scene {
     if (this.player.anims.isPlaying) {
       this.player.anims.stop();
       this.player.setFrame(this.standFrame());
+    }
+    if (wasMoving && !this.warping && !this.talking) {
+      this.scheduleSave();
     }
   }
 
@@ -707,6 +747,11 @@ export class MapScene extends Phaser.Scene {
   private dispatch(): string {
     const result = this.state.assignNext();
     this.refreshTicket();
+
+    this.moneyBox = this.add.rectangle(0, 0, 0, 0, HUD.box).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.nameCard);
+    this.moneyText = this.add.bitmapText(0, 0, FONT.key, '').setScrollFactor(0).setDepth(DEPTH.nameCard + 1);
+    // @ts-ignore
+    if (this.updateMoney) this.updateMoney();
     if (result.kind === 'none-left') return t('dispatcher.none-left');
     if (result.kind === 'busy') return t(`dispatcher.busy.${result.active.status}`, orderParams(result.active.order));
     return t(result.order.text.assign, orderParams(result.order));
@@ -716,6 +761,11 @@ export class MapScene extends Phaser.Scene {
   private useDeliveryPoint(point: DeliveryPoint): void {
     const result = this.state.interact(this.info.id, point.pointId);
     this.refreshTicket();
+
+    this.moneyBox = this.add.rectangle(0, 0, 0, 0, HUD.box).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.nameCard);
+    this.moneyText = this.add.bitmapText(0, 0, FONT.key, '').setScrollFactor(0).setDepth(DEPTH.nameCard + 1);
+    // @ts-ignore
+    if (this.updateMoney) this.updateMoney();
     const line =
       result.kind === 'nothing'
         ? t('delivery.nothing')

@@ -4,8 +4,14 @@
       "id": "order-1",
       "itemId": "order-1",
       "reward": 10,
-      "pickup": { "map": "jackson-heights", "pointId": "plaza-37rd-1" },
-      "dropoff": { "map": "jackson-heights", "pointId": "ave37-77-1" },
+      "pickup": {
+        "map": "jackson-heights",
+        "pointId": "plaza-37rd-1"
+      },
+      "dropoff": {
+        "map": "jackson-heights",
+        "pointId": "ave37-77-1"
+      },
       "text": {
         "item": "item.order-1.name",
         "assign": "order.order-1.assign",
@@ -17,8 +23,14 @@
       "id": "order-2",
       "itemId": "order-2",
       "reward": 15,
-      "pickup": { "map": "jackson-heights", "pointId": "ave37-83-1" },
-      "dropoff": { "map": "jackson-heights", "pointId": "rav-86-1" },
+      "pickup": {
+        "map": "jackson-heights",
+        "pointId": "ave37-83-1"
+      },
+      "dropoff": {
+        "map": "jackson-heights",
+        "pointId": "rav-86-1"
+      },
       "text": {
         "item": "item.order-2.name",
         "assign": "order.order-2.assign",
@@ -30,13 +42,76 @@
       "id": "order-3",
       "itemId": "order-3",
       "reward": 20,
-      "pickup": { "map": "jackson-heights", "pointId": "nb-80-1" },
-      "dropoff": { "map": "jackson-heights", "pointId": "plaza-triangle-1" },
+      "pickup": {
+        "map": "jackson-heights",
+        "pointId": "nb-80-1"
+      },
+      "dropoff": {
+        "map": "jackson-heights",
+        "pointId": "plaza-triangle-1"
+      },
       "text": {
         "item": "item.order-3.name",
         "assign": "order.order-3.assign",
         "pickedUp": "order.order-3.picked-up",
         "delivered": "order.order-3.delivered"
+      }
+    },
+    {
+      "id": "order-4",
+      "itemId": "order-4",
+      "reward": 25,
+      "pickup": {
+        "map": "jackson-heights",
+        "pointId": "hd-79-1"
+      },
+      "dropoff": {
+        "map": "jackson-heights",
+        "pointId": "rav-78-1"
+      },
+      "text": {
+        "item": "item.order-4.name",
+        "assign": "order.order-4.assign",
+        "pickedUp": "order.order-4.picked-up",
+        "delivered": "order.order-4.delivered"
+      }
+    },
+    {
+      "id": "order-5",
+      "itemId": "order-5",
+      "reward": 18,
+      "pickup": {
+        "map": "jackson-heights",
+        "pointId": "plaza-74-1"
+      },
+      "dropoff": {
+        "map": "jackson-heights",
+        "pointId": "hd-34ave-84-1"
+      },
+      "text": {
+        "item": "item.order-5.name",
+        "assign": "order.order-5.assign",
+        "pickedUp": "order.order-5.picked-up",
+        "delivered": "order.order-5.delivered"
+      }
+    },
+    {
+      "id": "order-6",
+      "itemId": "order-6",
+      "reward": 22,
+      "pickup": {
+        "map": "jackson-heights",
+        "pointId": "ave37-74-1"
+      },
+      "dropoff": {
+        "map": "jackson-heights",
+        "pointId": "hd-35ave-86-1"
+      },
+      "text": {
+        "item": "item.order-6.name",
+        "assign": "order.order-6.assign",
+        "pickedUp": "order.order-6.picked-up",
+        "delivered": "order.order-6.delivered"
       }
     }
   ]
