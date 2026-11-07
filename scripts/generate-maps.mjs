@@ -432,7 +432,8 @@ export function buildMaps(world, opts = {}) {
   const signFor = (use, gi, i, j, w, side) => {
     if (use !== 'commercial' || hash(i, j, 11) % 3 !== 0) return '';
     const span = (w - (side === '-' ? 0 : 1)) * T - 6;
-    const fits = (word) => SHOP_WORDS.includes(word) && EN_LENGTHS[word] * 6 <= span;
+    const fits = (word) => false;
+    return "";
     const geo = geos[gi];
     const seg = geo?.segment ?? geo?.from;
     const faceBiz = seg ? bizByFace.get(`${seg.id}/north`) : null;

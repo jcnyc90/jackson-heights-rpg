@@ -1,3 +1,4 @@
+import { BillboardManager } from "../systems/billboards";
 import Phaser from 'phaser';
 import {
   DIRECTIONS,
@@ -163,6 +164,7 @@ export class MapScene extends Phaser.Scene {
   private zoneShown: string | null = null;
   private zoneSeen: { id: string | null; since: number } = { id: null, since: 0 };
   private nameCard: Phaser.GameObjects.GameObject[] = [];
+  private billboardManager!: BillboardManager;
 
   constructor() {
     super('Map');
@@ -177,6 +179,12 @@ export class MapScene extends Phaser.Scene {
     this.warping = false;
     this.moveDir = null;
     this.acc = { x: 0, y: 0 };
+    const saveListener = () => { if (document.visibilityState === 'hidden') this.saveState(); }; window.addEventListener('visibilitychange', saveListener);
+    const pagehideListener = () => this.saveState(); window.addEventListener('pagehide', pagehideListener);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener('visibilitychange', saveListener);
+      window.removeEventListener('pagehide', pagehideListener);
+    });
     this.planned = { x: 0, y: 0 };
     this.world = null;
     this.radar = null;
@@ -271,6 +279,7 @@ export class MapScene extends Phaser.Scene {
     if (info.world) {
       this.world?.update(spawn.x, spawn.y, true);
       this.radar = new Radar(this, info.world, walk, RADAR.margin, RADAR.margin, DEPTH.radar, info.docks);
+      this.billboardManager = new BillboardManager(this, this.player, info.data);
       this.cornerBox = this.add.rectangle(0, 0, 0, 0, HUD.box).setOrigin(0).setScrollFactor(0).setDepth(DEPTH.corner).setVisible(false);
       this.cornerText = this.add.bitmapText(0, 0, FONT.key, '').setScrollFactor(0).setDepth(DEPTH.corner + 1).setVisible(false);
     }
@@ -354,6 +363,7 @@ export class MapScene extends Phaser.Scene {
     const { body } = this.player;
     this.player.setDepth(body.bottom);
     this.world?.update(body.center.x, body.bottom, false, this.speed());
+    if (this.billboardManager) this.billboardManager.update();
     if (this.emote.visible) {
       this.emote.setPosition(body.center.x, body.bottom - PLAYER_FRAME.height - 1);
       if (time >= this.emoteHideAt) this.emote.setVisible(false);
@@ -506,7 +516,9 @@ export class MapScene extends Phaser.Scene {
 
     const text = '$' + amount;
     // @ts-ignore
-    const r = this.hudBoxAt(2, text);
+    const width = [...text].length * FONT.charWidth + 2 * HUD_BOX.pad;
+    const height = FONT.lineHeight + 2 * HUD_BOX.pad;
+    const r = { x: 210, y: 16, width, height };
     this.moneyBox.setPosition(r.x, r.y).setSize(r.width, r.height);
     this.moneyText.setText(text).setPosition(r.x + HUD_BOX.pad, r.y + HUD_BOX.pad);
   }
@@ -754,6 +766,7 @@ export class MapScene extends Phaser.Scene {
     if (this.updateMoney) this.updateMoney();
     if (result.kind === 'none-left') return t('dispatcher.none-left');
     if (result.kind === 'busy') return t(`dispatcher.busy.${result.active.status}`, orderParams(result.active.order));
+    this.scheduleSave();
     return t(result.order.text.assign, orderParams(result.order));
   }
 
@@ -772,7 +785,7 @@ export class MapScene extends Phaser.Scene {
         : result.kind === 'not-picked-up'
           ? t('delivery.not-picked-up', orderParams(result.order))
           : t(result.kind === 'picked-up' ? result.order.text.pickedUp : result.order.text.delivered, orderParams(result.order));
-    this.openDialogue([line]);
+    this.openDialogue([line]); this.scheduleSave();
   }
 
   /** The nearest bike-share dock whose rectangle overlaps the talk probe (session 6f). */
@@ -795,12 +808,12 @@ export class MapScene extends Phaser.Scene {
     if (!this.state.riding) {
       if (bikes === 0) return this.openDialogue([t('bike.empty', { name })]);
       this.openDialogue([t('bike.rent.ask', { name, count: bikes })], yesNo, (c) => {
-        if (c === 0 && this.state.rent(dock.dockId)) this.afterDock(dock);
+        if (c === 0 && this.state.rent(dock.dockId)) { this.afterDock(dock); this.scheduleSave(); }
       });
     } else {
       if (bikes >= dock.slots) return this.openDialogue([t('bike.full', { name })]);
       this.openDialogue([t('bike.return.ask', { name })], yesNo, (c) => {
-        if (c === 0 && this.state.giveBack(dock.dockId, dock.slots)) this.afterDock(dock);
+        if (c === 0 && this.state.giveBack(dock.dockId, dock.slots)) { this.afterDock(dock); this.scheduleSave(); }
       });
     }
   }
