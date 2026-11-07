@@ -6,11 +6,11 @@
       "reward": 10,
       "pickup": {
         "map": "jackson-heights",
-        "pointId": "plaza-37rd-1"
+        "pointId": "ave37-74-1"
       },
       "dropoff": {
         "map": "jackson-heights",
-        "pointId": "ave37-77-1"
+        "pointId": "nb-86-1"
       },
       "text": {
         "item": "item.order-1.name",
@@ -25,11 +25,11 @@
       "reward": 15,
       "pickup": {
         "map": "jackson-heights",
-        "pointId": "ave37-83-1"
+        "pointId": "hd-35ave-80-1"
       },
       "dropoff": {
         "map": "jackson-heights",
-        "pointId": "rav-86-1"
+        "pointId": "rav-78-1"
       },
       "text": {
         "item": "item.order-2.name",
@@ -44,11 +44,11 @@
       "reward": 20,
       "pickup": {
         "map": "jackson-heights",
-        "pointId": "nb-80-1"
+        "pointId": "plaza-37rd-1"
       },
       "dropoff": {
         "map": "jackson-heights",
-        "pointId": "plaza-triangle-1"
+        "pointId": "hd-86-1"
       },
       "text": {
         "item": "item.order-3.name",
@@ -63,11 +63,11 @@
       "reward": 25,
       "pickup": {
         "map": "jackson-heights",
-        "pointId": "hd-79-1"
+        "pointId": "ave37-77-1"
       },
       "dropoff": {
         "map": "jackson-heights",
-        "pointId": "rav-78-1"
+        "pointId": "plaza-73-1"
       },
       "text": {
         "item": "item.order-4.name",
@@ -82,7 +82,7 @@
       "reward": 18,
       "pickup": {
         "map": "jackson-heights",
-        "pointId": "plaza-74-1"
+        "pointId": "rav-76-1"
       },
       "dropoff": {
         "map": "jackson-heights",
@@ -101,17 +101,55 @@
       "reward": 22,
       "pickup": {
         "map": "jackson-heights",
-        "pointId": "ave37-74-1"
+        "pointId": "plaza-triangle-1"
       },
       "dropoff": {
         "map": "jackson-heights",
-        "pointId": "hd-35ave-86-1"
+        "pointId": "ave37-83-1"
       },
       "text": {
         "item": "item.order-6.name",
         "assign": "order.order-6.assign",
         "pickedUp": "order.order-6.picked-up",
         "delivered": "order.order-6.delivered"
+      }
+    },
+    {
+      "id": "order-7",
+      "itemId": "order-7",
+      "reward": 28,
+      "pickup": {
+        "map": "jackson-heights",
+        "pointId": "rav-89-1"
+      },
+      "dropoff": {
+        "map": "jackson-heights",
+        "pointId": "hd-79-1"
+      },
+      "text": {
+        "item": "item.order-7.name",
+        "assign": "order.order-7.assign",
+        "pickedUp": "order.order-7.picked-up",
+        "delivered": "order.order-7.delivered"
+      }
+    },
+    {
+      "id": "order-8",
+      "itemId": "order-8",
+      "reward": 30,
+      "pickup": {
+        "map": "jackson-heights",
+        "pointId": "nb-80-1"
+      },
+      "dropoff": {
+        "map": "jackson-heights",
+        "pointId": "rav-83-1"
+      },
+      "text": {
+        "item": "item.order-8.name",
+        "assign": "order.order-8.assign",
+        "pickedUp": "order.order-8.picked-up",
+        "delivered": "order.order-8.delivered"
       }
     }
   ]

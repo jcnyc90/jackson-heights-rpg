@@ -153,7 +153,7 @@ test('land use decides what each block face shows (owner\'s decision 11): every 
   assert.ok(buildings.length > 1000);
   // Storefront signs only carry a word on a minority of shops; the rest are blank panels.
   const shops = buildings.filter((b) => b.kind === 'storefront');
-  assert.ok(shops.filter((b) => b.sign).length < shops.length / 2);
+  assert.ok(shops.filter((b) => b.sign).length === 0);
   // Front faces 3-5 tiles tall (decision 1): image rows minus the roof (and the lip when it fronts north).
   for (const b of buildings) {
     const face = b.h - b.roof - (b.front === 'n' ? 1 : 0);
